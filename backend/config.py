@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     HEADLESS: bool = True
     SLOW_MO: int = 100  # ms between actions (anti-detection)
 
+    # AI form filling
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "google/gemini-2.0-flash-001"
+
     # Paths
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"
 

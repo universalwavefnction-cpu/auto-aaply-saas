@@ -111,6 +111,8 @@ class JobFilter(Base):
     blacklist_companies = Column(JSON, default=list)
     blacklist_keywords = Column(JSON, default=list)
     autopilot_enabled = Column(Boolean, default=False)
+    platform = Column(String, default="stepstone")  # "stepstone" or "xing"
+    max_applications = Column(Integer, default=10)  # 1-50
 
     user = relationship("User", back_populates="job_filter")
 

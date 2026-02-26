@@ -1,12 +1,42 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null)
+  const [jobTitle, setJobTitle] = useState('')
+  const [location, setLocation] = useState('')
+  const [platform, setPlatform] = useState('stepstone')
+  const [maxApps, setMaxApps] = useState(10)
+  const [launching, setLaunching] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
     api.getStats().then(setStats)
+    // Pre-fill from saved filters
+    api.getFilters().then(f => {
+      if (f && !f.error) {
+        if (f.job_titles?.length) setJobTitle(f.job_titles[0])
+        if (f.locations?.length) setLocation(f.locations[0])
+        if (f.platform) setPlatform(f.platform)
+        if (f.max_applications) setMaxApps(f.max_applications)
+      }
+    })
   }, [])
+
+  const launch = async () => {
+    if (!jobTitle.trim()) return
+    setLaunching(true)
+    // Save filters then start bot
+    await api.updateFilters({
+      job_titles: [jobTitle.trim()],
+      locations: location.trim() ? [location.trim()] : ['deutschland'],
+      platform,
+      max_applications: maxApps,
+    })
+    await api.startBot('scrape_and_apply')
+    navigate('/bot')
+  }
 
   if (!stats) return (
     <div className="flex items-center justify-center h-full">
@@ -40,6 +70,83 @@ export default function Dashboard() {
           <div className="w-1.5 h-1.5 rounded-full bg-[#27C93F] animate-pulse"></div>
           <span className="text-[8px] font-bold text-[#27C93F] uppercase tracking-widest">Active</span>
         </div>
+      </div>
+
+      {/* Quick Launch */}
+      <div className="bg-[#0A0A0A] border border-amber-500/20 rounded-2xl p-8">
+        <div className="flex items-center gap-2 mb-6">
+          <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" strokeLinecap="round" strokeWidth="2.5"/>
+          </svg>
+          <span className="text-[9px] font-black text-amber-500 uppercase tracking-[0.25em]">Quick Launch — Start Applying</span>
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] block mb-2">What position?</label>
+            <input
+              value={jobTitle}
+              onChange={e => setJobTitle(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && launch()}
+              placeholder="e.g. Kellner, Project Manager, Barista..."
+              className="w-full px-5 py-4 bg-black border border-white/10 rounded-xl text-white text-lg placeholder:text-white/15 focus:outline-none focus:border-amber-500/50 transition-colors"
+            />
+          </div>
+          <div className="w-56">
+            <label className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] block mb-2">Where?</label>
+            <input
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && launch()}
+              placeholder="e.g. Berlin, München..."
+              className="w-full px-5 py-4 bg-black border border-white/10 rounded-xl text-white text-lg placeholder:text-white/15 focus:outline-none focus:border-amber-500/50 transition-colors"
+            />
+          </div>
+          <div className="w-44">
+            <label className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] block mb-2">Platform</label>
+            <div className="flex gap-1.5">
+              {(['stepstone', 'xing', 'linkedin'] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPlatform(p)}
+                  className={`flex-1 py-4 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all ${
+                    platform === p
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                      : p === 'linkedin'
+                        ? 'bg-black border-white/5 text-white/10 cursor-not-allowed'
+                        : 'bg-black border-white/5 text-white/25 hover:text-white/50 hover:border-white/10'
+                  }`}
+                  disabled={p === 'linkedin'}
+                >
+                  {p === 'linkedin' ? <span title="Coming soon">LI</span> : p === 'stepstone' ? 'SS' : 'XI'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="w-32">
+            <label className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] block mb-2">Applications</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={1}
+                max={50}
+                value={maxApps}
+                onChange={e => setMaxApps(Number(e.target.value))}
+                className="flex-1 accent-amber-500 h-1"
+              />
+              <span className="text-amber-500 font-black text-lg w-8 text-right tabular-nums">{maxApps}</span>
+            </div>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={launch}
+              disabled={launching || !jobTitle.trim()}
+              className="px-8 py-4 bg-amber-500 hover:bg-amber-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl text-sm font-black uppercase tracking-wider shadow-lg shadow-amber-500/25 transition-all whitespace-nowrap"
+            >
+              {launching ? 'Launching...' : 'Go →'}
+            </button>
+          </div>
+        </div>
+        <p className="text-[10px] text-white/15 mt-3">Type a job title, pick a city, hit Go — the bot scrapes jobs and auto-applies for you.</p>
       </div>
 
       {/* Stats Row */}

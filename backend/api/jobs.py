@@ -77,6 +77,8 @@ def get_filters(user: User = Depends(get_current_user), db: Session = Depends(ge
         "blacklist_companies": f.blacklist_companies or [],
         "blacklist_keywords": f.blacklist_keywords or [],
         "autopilot_enabled": f.autopilot_enabled,
+        "platform": f.platform or "stepstone",
+        "max_applications": f.max_applications or 10,
     }
 
 

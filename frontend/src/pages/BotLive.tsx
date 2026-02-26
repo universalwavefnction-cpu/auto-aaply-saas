@@ -195,61 +195,34 @@ export default function BotLive() {
         </div>
       )}
 
-      {/* Main Content: Screenshot + Terminal */}
-      <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
-        {/* Screenshot Panel */}
-        <div className="bg-[#0A0A0A] border border-white/5 rounded-xl overflow-hidden flex flex-col">
-          <div className="px-4 py-2.5 border-b border-white/5 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500"></div>
-            <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-            <div className="w-2 h-2 rounded-full bg-[#27C93F]"></div>
-            <span className="ml-2 text-[8px] font-black text-white/15 uppercase tracking-[0.2em]">Browser View</span>
+      {/* Activity Log — Full Width */}
+      <div className="flex-1 bg-[#0A0A0A] border border-white/5 rounded-xl overflow-hidden flex flex-col min-h-0">
+        <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500 font-black">_</span>
+            <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em]">Activity Log</span>
           </div>
-          <div className="flex-1 flex items-center justify-center p-2 bg-black">
-            {screenshotUrl ? (
-              <img
-                src={screenshotUrl}
-                alt="Bot screenshot"
-                className="max-w-full max-h-full object-contain rounded"
-              />
-            ) : (
-              <div className="text-center">
-                <p className="text-white/10 text-[11px] font-black uppercase tracking-[0.2em]">No browser active</p>
-                <p className="text-white/5 text-[10px] mt-1">Screenshots appear here when bot runs</p>
-              </div>
-            )}
-          </div>
+          <span className="text-[8px] font-bold text-white/10">{logs.length} events</span>
         </div>
-
-        {/* Terminal Panel */}
-        <div className="bg-[#0A0A0A] border border-white/5 rounded-xl overflow-hidden flex flex-col">
-          <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-amber-500 font-black">_</span>
-              <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em]">Activity Log</span>
+        <div ref={logRef} className="flex-1 overflow-auto p-3 font-mono text-[11px] space-y-0.5 custom-scrollbar">
+          {logs.map((log, i) => (
+            <div key={i} className={`flex gap-2 px-1 py-0.5 rounded hover:bg-white/[0.02] ${levelColor(log.level)}`}>
+              <span className="text-white/10 w-16 shrink-0 tabular-nums">
+                {log.ts?.split('T')[1]?.slice(0, 8) || ''}
+              </span>
+              <span className="w-4 shrink-0 text-center">{eventIcon(log.event)}</span>
+              <span className="break-all">{log.message || log.event}</span>
             </div>
-            <span className="text-[8px] font-bold text-white/10">{logs.length} events</span>
-          </div>
-          <div ref={logRef} className="flex-1 overflow-auto p-3 font-mono text-[11px] space-y-0.5 custom-scrollbar">
-            {logs.map((log, i) => (
-              <div key={i} className={`flex gap-2 px-1 py-0.5 rounded hover:bg-white/[0.02] ${levelColor(log.level)}`}>
-                <span className="text-white/10 w-16 shrink-0 tabular-nums">
-                  {log.ts?.split('T')[1]?.slice(0, 8) || ''}
-                </span>
-                <span className="w-4 shrink-0 text-center">{eventIcon(log.event)}</span>
-                <span className="break-all">{log.message || log.event}</span>
-              </div>
-            ))}
-            {logs.length === 0 && !running && (
-              <div className="text-white/10 text-center py-10">
-                <p className="text-[11px] font-black uppercase tracking-[0.2em]">Ready</p>
-                <p className="text-[10px] mt-1">Click "Start Full Cycle" to begin</p>
-              </div>
-            )}
-            {running && (
-              <div className="text-amber-500 animate-pulse font-bold tracking-widest text-lg px-1">_</div>
-            )}
-          </div>
+          ))}
+          {logs.length === 0 && !running && (
+            <div className="text-white/10 text-center py-10">
+              <p className="text-[11px] font-black uppercase tracking-[0.2em]">Ready</p>
+              <p className="text-[10px] mt-1">Click "Start Full Cycle" to begin</p>
+            </div>
+          )}
+          {running && (
+            <div className="text-amber-500 animate-pulse font-bold tracking-widest text-lg px-1">_</div>
+          )}
         </div>
       </div>
 

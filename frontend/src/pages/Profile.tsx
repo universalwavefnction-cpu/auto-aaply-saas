@@ -7,6 +7,7 @@ export default function Profile() {
   const [questions, setQuestions] = useState<Record<string, string>>({})
   const [newQ, setNewQ] = useState('')
   const [newA, setNewA] = useState('')
+  const [newCred, setNewCred] = useState({ platform: 'stepstone', email: '', password: '' })
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -111,7 +112,7 @@ export default function Profile() {
       {/* Credentials */}
       <div className="bg-[#0A0A0A] border border-white/5 rounded-xl p-6">
         <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-4">Platform Credentials</span>
-        <div className="space-y-2">
+        <div className="space-y-2 mb-4">
           {credentials.map(c => (
             <div key={c.id} className="flex items-center justify-between px-3 py-2.5 bg-black border border-white/5 rounded-lg">
               <div className="flex items-center gap-3">
@@ -126,6 +127,49 @@ export default function Profile() {
               </button>
             </div>
           ))}
+          {credentials.length === 0 && (
+            <p className="text-[10px] text-white/10 italic px-3">No credentials yet — add your StepStone or Xing login below</p>
+          )}
+        </div>
+        <div className="border-t border-white/5 pt-4">
+          <span className="text-[8px] font-black text-white/10 uppercase tracking-[0.2em] block mb-3">Add Credential</span>
+          <div className="flex gap-2">
+            <select
+              value={newCred.platform}
+              onChange={e => setNewCred({ ...newCred, platform: e.target.value })}
+              className="px-3 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500/30 appearance-none cursor-pointer"
+            >
+              <option value="stepstone">StepStone</option>
+              <option value="xing">Xing</option>
+              <option value="linkedin">LinkedIn</option>
+            </select>
+            <input
+              value={newCred.email}
+              onChange={e => setNewCred({ ...newCred, email: e.target.value })}
+              placeholder="Email / Username"
+              className="flex-1 px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white placeholder:text-white/15 focus:outline-none focus:border-amber-500/30"
+            />
+            <input
+              type="password"
+              value={newCred.password}
+              onChange={e => setNewCred({ ...newCred, password: e.target.value })}
+              placeholder="Password"
+              className="flex-1 px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white placeholder:text-white/15 focus:outline-none focus:border-amber-500/30"
+            />
+            <button
+              onClick={async () => {
+                if (!newCred.email || !newCred.password) return
+                const res = await api.addCredential(newCred)
+                if (res && !res.error) {
+                  setCredentials([...credentials, res])
+                  setNewCred({ platform: 'stepstone', email: '', password: '' })
+                }
+              }}
+              className="px-4 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 hover:bg-amber-500/20 font-bold transition-colors"
+            >
+              + Add
+            </button>
+          </div>
         </div>
       </div>
 
