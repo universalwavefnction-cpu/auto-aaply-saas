@@ -1,0 +1,53 @@
+from abc import ABC, abstractmethod
+from playwright.async_api import async_playwright, Browser, Page
+from ..config import settings
+import asyncio
+import random
+
+
+class BaseScraper(ABC):
+    """Base class for all job platform scrapers."""
+
+    PLATFORM = "unknown"
+
+    def __init__(self):
+        self.browser: Browser | None = None
+        self.page: Page | None = None
+
+    async def start(self):
+        pw = await async_playwright().start()
+        self.browser = await pw.chromium.launch(
+            headless=settings.HEADLESS,
+            slow_mo=settings.SLOW_MO,
+        )
+        context = await self.browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            locale="de-DE",
+        )
+        self.page = await context.new_page()
+
+    async def stop(self):
+        if self.browser:
+            await self.browser.close()
+
+    async def random_delay(self, min_s: float = 1.0, max_s: float = 3.0):
+        await asyncio.sleep(random.uniform(min_s, max_s))
+
+    @abstractmethod
+    async def login(self, email: str, password: str) -> bool:
+        """Login to the platform. Returns True on success."""
+        ...
+
+    @abstractmethod
+    async def search_jobs(self, query: str, location: str = "") -> list[dict]:
+        """Search for jobs. Returns list of job dicts."""
+        ...
+
+    @abstractmethod
+    async def apply_to_job(self, job_url: str, profile: dict) -> dict:
+        """Apply to a job. Returns result dict with status and error."""
+        ...
