@@ -9,7 +9,7 @@ from jose import JWTError, jwt
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from ..auth import get_current_user
+from ..auth import ALGORITHM, create_sse_token, get_current_user
 from ..bot_engine import SCREENSHOT_DIR, BotEngine
 from ..config import settings
 from ..database import get_db
@@ -64,13 +64,24 @@ async def bot_status(user: User = Depends(get_current_user)):
     }
 
 
-def _get_user_from_token(token: str, db: Session) -> User:
-    """Decode JWT token and return user. Used for SSE where Authorization header isn't available."""
+@router.post("/stream-token")
+async def get_stream_token(user: User = Depends(get_current_user)):
+    """Get a short-lived token (60s) for SSE stream connection.
+
+    This avoids passing the main JWT in URL query params where it could be logged.
+    """
+    return {"token": create_sse_token(user.id)}
+
+
+def _get_user_from_sse_token(token: str, db: Session) -> User:
+    """Decode a short-lived SSE token. Only accepts type='sse'."""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "sse":
+            raise HTTPException(401, "Invalid token type — use /stream-token first")
         user_id = int(payload.get("sub"))
     except (JWTError, TypeError, ValueError):
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(401, "Invalid or expired stream token")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(401, "User not found")
@@ -84,9 +95,9 @@ async def stream_events(
 ):
     """Server-Sent Events stream of bot activity.
 
-    Uses token query param since EventSource can't send Authorization headers.
+    Requires a short-lived SSE token from POST /stream-token.
     """
-    user = _get_user_from_token(token, db)
+    user = _get_user_from_sse_token(token, db)
     engine = active_bots.get(user.id)
     if not engine:
         raise HTTPException(400, "Bot is not running")

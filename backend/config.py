@@ -1,3 +1,5 @@
+import secrets
+import sys
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
@@ -9,7 +11,16 @@ class Settings(BaseSettings):
     APP_NAME: str = "AutoApply Web"
     DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'data' / 'autoapply.db'}"
     SECRET_KEY: str = "change-me-in-production"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24h
+    CREDENTIAL_KEY: str = ""  # Key for encrypting platform credentials (Fernet)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1h (was 24h)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    SSE_TOKEN_EXPIRE_SECONDS: int = 60  # Short-lived SSE stream tokens
+
+    # CORS — override in .env for production
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+
+    # Upload limits
+    MAX_UPLOAD_SIZE_MB: int = 10
 
     # Scraper settings
     SCRAPE_INTERVAL_MINUTES: int = 30
@@ -43,5 +54,28 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ── Startup safety checks ────────────────────────────────────────────────
+
+if settings.SECRET_KEY == "change-me-in-production":
+    print(
+        "\n[SECURITY] SECRET_KEY is still the default!"
+        "\n  Generate one: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+        "\n  Add to .env:  SECRET_KEY=<your-key>\n",
+        file=sys.stderr,
+    )
+    # Auto-generate for dev so the app still starts, but warn loudly
+    settings.SECRET_KEY = secrets.token_urlsafe(64)
+
+if not settings.CREDENTIAL_KEY:
+    print(
+        "\n[SECURITY] CREDENTIAL_KEY is not set — platform credentials won't be encrypted safely!"
+        "\n  Generate one: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        "\n  Add to .env:  CREDENTIAL_KEY=<your-key>\n",
+        file=sys.stderr,
+    )
+    # Auto-generate for dev
+    settings.CREDENTIAL_KEY = secrets.token_urlsafe(32)
+
 settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)

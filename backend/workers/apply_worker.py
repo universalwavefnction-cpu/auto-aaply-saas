@@ -82,7 +82,7 @@ async def run_apply_cycle(user_id: int, max_applications: int = 10):
             scraper = scraper_cls()
             try:
                 await scraper.start()
-                logged_in = await scraper.login(cred.email, cred.password_encrypted)
+                logged_in = await scraper.login(cred.email, cred.get_password())
                 if not logged_in:
                     results["errors"].append(f"{platform}: login failed")
                     continue

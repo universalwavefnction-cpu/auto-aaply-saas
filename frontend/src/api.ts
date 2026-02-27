@@ -33,10 +33,33 @@ export const api = {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `username=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
     })
-    return res.json()
+    const data = await res.json()
+    if (data.refresh_token) {
+      localStorage.setItem('refresh_token', data.refresh_token)
+    }
+    return data
   },
-  register: (email: string, password: string) =>
-    request('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  register: async (email: string, password: string) => {
+    const data = await request('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) })
+    if (data.refresh_token) {
+      localStorage.setItem('refresh_token', data.refresh_token)
+    }
+    return data
+  },
+  refresh: async () => {
+    const refreshToken = localStorage.getItem('refresh_token')
+    if (!refreshToken) return null
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (data.access_token) localStorage.setItem('token', data.access_token)
+    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+    return data
+  },
   me: () => request('/auth/me'),
 
   // Profile
@@ -90,6 +113,7 @@ export const api = {
     request(`/bot/start?mode=${mode}`, { method: 'POST' }),
   stopBot: () => request('/bot/stop', { method: 'POST' }),
   getBotStatus: () => request('/bot/status'),
+  getStreamToken: () => request('/bot/stream-token', { method: 'POST' }),
   getBotSessions: () => request('/bot/logs/sessions'),
   getBotLogs: (sessionId?: string) =>
     request(`/bot/logs${sessionId ? `?session_id=${sessionId}` : ''}`),

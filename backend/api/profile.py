@@ -1,6 +1,6 @@
 import shutil
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,14 @@ from ..auth import get_current_user
 from ..config import settings
 from ..database import get_db
 from ..models import CVFile, PlatformCredential, Profile, User
+from ..security import encrypt_credential
+
+ALLOWED_CV_EXTENSIONS = {".pdf", ".doc", ".docx"}
+ALLOWED_CV_MIMETYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 router = APIRouter()
 
@@ -77,9 +85,28 @@ def upload_cv(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    import os
     import re
 
-    safe_name = re.sub(r"[^\w\-.]", "_", file.filename or "cv.pdf")
+    # Validate file extension
+    filename = file.filename or "cv.pdf"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_CV_EXTENSIONS:
+        raise HTTPException(400, f"File type '{ext}' not allowed. Use: {', '.join(ALLOWED_CV_EXTENSIONS)}")
+
+    # Validate MIME type
+    if file.content_type and file.content_type not in ALLOWED_CV_MIMETYPES:
+        raise HTTPException(400, f"MIME type '{file.content_type}' not allowed")
+
+    # Check file size (read first chunk to verify)
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    file.file.seek(0, 2)  # Seek to end
+    size = file.file.tell()
+    file.file.seek(0)  # Reset
+    if size > max_bytes:
+        raise HTTPException(400, f"File too large ({size // (1024*1024)}MB). Max: {settings.MAX_UPLOAD_SIZE_MB}MB")
+
+    safe_name = re.sub(r"[^\w\-.]", "_", filename)
     dest = settings.UPLOAD_DIR / f"cv_{user.id}_{safe_name}"
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -132,7 +159,7 @@ def add_credential(
         user_id=user.id,
         platform=data.platform.lower(),
         email=data.email,
-        password_encrypted=data.password,  # TODO: encrypt properly
+        password_encrypted=encrypt_credential(data.password),
     )
     db.add(cred)
     db.commit()

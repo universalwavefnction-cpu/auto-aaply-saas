@@ -47,9 +47,10 @@ export default function BotLive() {
     }
   }, [logs])
 
-  const connectSSE = () => {
-    const token = localStorage.getItem('token')
-    const es = new EventSource(`/api/bot/stream?token=${token}`)
+  const connectSSE = async () => {
+    // Fetch a short-lived SSE token instead of exposing the main JWT in URL
+    const { token: sseToken } = await api.getStreamToken()
+    const es = new EventSource(`/api/bot/stream?token=${sseToken}`)
     eventSourceRef.current = es
 
     const handleEvent = (e: MessageEvent) => {

@@ -54,6 +54,16 @@ class PlatformCredential(Base):
 
     user = relationship("User", back_populates="credentials")
 
+    def get_password(self) -> str:
+        """Decrypt the stored password. Handles both encrypted and legacy plaintext."""
+        from .security import decrypt_credential
+
+        try:
+            return decrypt_credential(self.password_encrypted)
+        except Exception:
+            # Legacy plaintext — return as-is (will be re-encrypted on next save)
+            return self.password_encrypted
+
 
 class Job(Base):
     __tablename__ = "jobs"

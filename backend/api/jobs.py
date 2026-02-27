@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,20 @@ from ..database import get_db
 from ..models import Job, JobFilter, User
 
 router = APIRouter()
+
+
+class FilterUpdate(BaseModel):
+    job_titles: list[str] | None = None
+    locations: list[str] | None = None
+    remote_only: bool | None = None
+    min_salary: int | None = None
+    max_salary: int | None = None
+    blacklist_companies: list[str] | None = None
+    blacklist_keywords: list[str] | None = None
+    autopilot_enabled: bool | None = None
+    platform: str | None = None
+    max_applications: int | None = None
+    selected_cv_id: int | None = None
 
 
 @router.get("")
@@ -96,7 +111,7 @@ def get_filters(user: User = Depends(get_current_user), db: Session = Depends(ge
 
 @router.put("/filters")
 def update_filters(
-    data: dict,
+    data: FilterUpdate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -104,8 +119,7 @@ def update_filters(
     if not f:
         f = JobFilter(user_id=user.id)
         db.add(f)
-    for key, val in data.items():
-        if hasattr(f, key):
-            setattr(f, key, val)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(f, field, value)
     db.commit()
     return {"status": "updated"}

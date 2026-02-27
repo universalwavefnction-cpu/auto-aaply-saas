@@ -44,7 +44,7 @@ async def run_scrape_cycle(user_id: int):
             scraper = scraper_cls()
             try:
                 await scraper.start()
-                logged_in = await scraper.login(cred.email, cred.password_encrypted)
+                logged_in = await scraper.login(cred.email, cred.get_password())
                 if not logged_in:
                     results["errors"].append(f"{cred.platform}: login failed")
                     continue

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,19 @@ from ..database import get_db
 from ..models import Application, User
 
 router = APIRouter()
+
+
+class ResponseUpdate(BaseModel):
+    response_status: str | None = None
+    notes: str | None = None
+
+
+class ManualApplication(BaseModel):
+    job_id: int | None = None
+    platform: str = "manual"
+    job_title: str | None = None
+    company: str | None = None
+    url: str | None = None
 
 
 @router.get("")
@@ -61,7 +75,7 @@ def list_applications(
 @router.post("/{app_id}/response")
 def update_response(
     app_id: int,
-    data: dict,
+    data: ResponseUpdate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -75,28 +89,26 @@ def update_response(
     )
     if not app:
         return {"error": "Application not found"}
-    if "response_status" in data:
-        app.response_status = data["response_status"]
-    if "notes" in data:
-        app.notes = data["notes"]
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(app, field, value)
     db.commit()
     return {"status": "updated"}
 
 
 @router.post("/manual")
 def manual_apply(
-    data: dict,
+    data: ManualApplication,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Mark a job as manually applied (user applied themselves via the link)."""
     app = Application(
         user_id=user.id,
-        job_id=data.get("job_id"),
-        platform=data.get("platform", "manual"),
-        job_title=data.get("job_title"),
-        company=data.get("company"),
-        url=data.get("url"),
+        job_id=data.job_id,
+        platform=data.platform,
+        job_title=data.job_title,
+        company=data.company,
+        url=data.url,
         status="success",
         is_manual=True,
         applied_at=datetime.now(timezone.utc),

@@ -112,6 +112,7 @@ function App() {
         <button
           onClick={() => {
             localStorage.removeItem('token')
+            localStorage.removeItem('refresh_token')
             setToken(null)
           }}
           className="flex items-center gap-3 border-t border-white/5 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em] text-white/20 transition-colors hover:text-red-400"

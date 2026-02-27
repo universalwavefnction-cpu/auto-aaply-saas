@@ -26,7 +26,26 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_access_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(
-        {"sub": str(user_id), "exp": expire},
+        {"sub": str(user_id), "exp": expire, "type": "access"},
+        settings.SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def create_refresh_token(user_id: int) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    return jwt.encode(
+        {"sub": str(user_id), "exp": expire, "type": "refresh"},
+        settings.SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def create_sse_token(user_id: int) -> str:
+    """Short-lived token for SSE streams (passed via query param)."""
+    expire = datetime.now(timezone.utc) + timedelta(seconds=settings.SSE_TOKEN_EXPIRE_SECONDS)
+    return jwt.encode(
+        {"sub": str(user_id), "exp": expire, "type": "sse"},
         settings.SECRET_KEY,
         algorithm=ALGORITHM,
     )
@@ -38,6 +57,8 @@ def get_current_user(
 ) -> User:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") not in ("access", None):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
         user_id = int(payload.get("sub"))
     except (JWTError, TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

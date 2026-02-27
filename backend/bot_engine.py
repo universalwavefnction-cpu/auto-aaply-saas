@@ -865,11 +865,32 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 self._db = None
 
             duration = time.time() - start_time
+            ext_count = self.stats.get("external", 0)
+            summary = f"Session complete: {self.stats['applied']} applied, {self.stats['failed']} failed"
+            if ext_count:
+                summary += f", {ext_count} external"
+            summary += f" in {duration:.0f}s"
             await self.log("info", "system", "session_end", {
-                "message": f"Session complete: {self.stats['applied']} applied, {self.stats['failed']} failed in {duration:.0f}s",
+                "message": summary,
                 "duration_s": duration,
                 "stats": self.stats,
             })
+            # Log external jobs summary if any were found
+            if ext_count and self._db:
+                try:
+                    ext_apps = self._db.query(Application).filter(
+                        Application.user_id == self.user_id,
+                        Application.status == "external",
+                        Application.applied_at >= datetime.fromtimestamp(start_time, tz=timezone.utc),
+                    ).all()
+                    if ext_apps:
+                        lines = [f"  {a.job_title} at {a.company}" + (f" — {a.notes}" if a.notes else "") for a in ext_apps]
+                        await self.log("info", "system", "external_summary", {
+                            "message": f"External jobs ({len(ext_apps)}) — apply manually:\n" + "\n".join(lines),
+                            "external_jobs": [{"title": a.job_title, "company": a.company, "url": a.url, "employer_url": a.notes} for a in ext_apps],
+                        })
+                except:
+                    pass
             await self.emit_status("complete")
             self.running = False
 
@@ -1389,7 +1410,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 nav_ok = False
                 for attempt in range(3):
                     try:
-                        await self._page.goto(_to_short_url(job.url), timeout=45000, wait_until="domcontentloaded")
+                        await self._page.goto(_to_short_url(job.url), timeout=45000, wait_until="load")
                         nav_ok = True
                         break
                     except Exception as nav_err:
@@ -1423,10 +1444,15 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 await self._dismiss_popups()  # Dismiss job alert popup
                 await asyncio.sleep(1)
 
+                # Log current URL to detect redirects
+                cur_url = self._page.url
+                await self.log("info", "browser", "current_url", {
+                    "message": f"  URL: {cur_url}",
+                    "url": cur_url,
+                }, job_id=job.id, platform=job.platform)
+
                 # Find apply button — try full apply first, then Schnellbewerbung
-                apply_btn = None
-                btn_text = ""
-                for sel in [
+                apply_selectors = [
                     'a:has-text("Jetzt bewerben")',
                     'button:has-text("Jetzt bewerben")',
                     'a:has-text("Apply now")',
@@ -1439,34 +1465,88 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     'a:has-text("Bewerbung fortsetzen")',
                     'button:has-text("Continue application")',
                     'a:has-text("Continue application")',
-                ]:
-                    apply_btn = await self._page.query_selector(sel)
-                    if apply_btn and await apply_btn.is_visible():
-                        btn_text = (await apply_btn.inner_text()).strip()
-                        await self.log("info", "apply", "button_found", {
-                            "message": f"  Apply button: \"{btn_text}\"",
-                            "selector": sel, "button_text": btn_text,
-                        }, job_id=job.id, platform=job.platform)
+                    # Broader selectors — StepStone UI changes
+                    'a:has-text("Bewerben")',
+                    'button:has-text("Bewerben")',
+                    'a:has-text("Apply")',
+                    'button:has-text("Apply")',
+                    'a:has-text("Online bewerben")',
+                    'button:has-text("Online bewerben")',
+                    '[data-at="job-item-apply-link"]',
+                    '[data-testid="apply-button"]',
+                    '[data-genesis-element="APPLY_BUTTON"]',
+                ]
+
+                # Wait up to 8s for any apply button to appear (JS-rendered)
+                apply_btn = None
+                btn_text = ""
+                for wait_attempt in range(4):
+                    for sel in apply_selectors:
+                        try:
+                            apply_btn = await self._page.query_selector(sel)
+                            if apply_btn and await apply_btn.is_visible():
+                                btn_text = (await apply_btn.inner_text()).strip()
+                                # Skip if it's actually "I'm interested" / "Ich bin interessiert"
+                                if "interested" in btn_text.lower() or "interessiert" in btn_text.lower():
+                                    apply_btn = None
+                                    continue
+                                await self.log("info", "apply", "button_found", {
+                                    "message": f"  Apply button: \"{btn_text}\"",
+                                    "selector": sel, "button_text": btn_text,
+                                }, job_id=job.id, platform=job.platform)
+                                break
+                            apply_btn = None
+                        except:
+                            apply_btn = None
+                    if apply_btn:
                         break
-                    apply_btn = None
+                    if wait_attempt < 3:
+                        await asyncio.sleep(2)
 
                 # Skip "Ich bin interessiert" / "I'm interested" — these are NOT real applications
                 # (user receives no confirmation email, StepStone just records interest)
 
                 if not apply_btn:
-                    # Debug: log what buttons actually exist on page
-                    all_btns = await self._page.query_selector_all("button:visible")
-                    btn_texts = []
-                    for b in all_btns[:15]:
-                        try:
-                            t = (await b.inner_text()).strip()
-                            if t and len(t) < 60:
-                                btn_texts.append(t)
-                        except: pass
+                    # Deep diagnostic: search ALL elements for apply-related text via JS
+                    diag = await self._page.evaluate("""() => {
+                        const results = {iframes: [], applyElements: []};
+                        // Check for iframes
+                        document.querySelectorAll('iframe').forEach(f => {
+                            results.iframes.push({src: (f.src || '').substring(0, 120), id: f.id || ''});
+                        });
+                        // Find ANY element containing bewerb/apply text
+                        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+                        while (walker.nextNode()) {
+                            const el = walker.currentNode;
+                            const ownText = Array.from(el.childNodes)
+                                .filter(n => n.nodeType === 3)
+                                .map(n => n.textContent.trim()).join(' ').trim();
+                            const lower = ownText.toLowerCase();
+                            if ((lower.includes('bewerb') || lower.includes('apply')) && ownText.length < 80 && ownText.length > 0) {
+                                const tag = el.tagName;
+                                const role = el.getAttribute('role') || '';
+                                const href = el.getAttribute('href') || '';
+                                const dataAt = el.getAttribute('data-at') || '';
+                                const cls = (el.className || '').toString().substring(0, 60);
+                                if (results.applyElements.length < 15) {
+                                    results.applyElements.push({tag, text: ownText, role, href: href.substring(0, 100), dataAt, cls});
+                                }
+                            }
+                        }
+                        return results;
+                    }""")
+                    iframes = diag.get("iframes", [])
+                    apply_els = diag.get("applyElements", [])
                     await self.log("warn", "apply", "no_button", {
-                        "message": f"  No apply button found — skipping. Buttons on page: {btn_texts[:8]}",
-                        "buttons_found": btn_texts,
+                        "message": f"  No apply btn. URL: {self._page.url} | Iframes: {len(iframes)} | Apply-text elements: {len(apply_els)}",
+                        "iframes": iframes[:5],
+                        "apply_elements": apply_els[:10],
                     }, job_id=job.id, platform=job.platform)
+                    for el in apply_els[:5]:
+                        await self.log("info", "apply", "diag_element", {
+                            "message": f"  DIAG: <{el['tag']} role='{el['role']}' data-at='{el['dataAt']}' class='{el['cls'][:40]}'> {el['text'][:60]}",
+                        }, job_id=job.id, platform=job.platform)
+                    await self._screenshot(f"no_apply_btn_{job.id}")
                     application.status = "external"
                     application.error_log = "No apply button found on page"
                     db.commit()
@@ -1499,14 +1579,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
                 # Re-find button after overlay removal (DOM changes can detach handles)
                 apply_btn = None
-                all_selectors = [
-                    'a:has-text("Jetzt bewerben")', 'button:has-text("Jetzt bewerben")',
-                    'a:has-text("Apply now")', 'button:has-text("Apply now")',
-                    'a:has-text("Schnelle Bewerbung")', 'button:has-text("Schnelle Bewerbung")',
-                    'a:has-text("Quick apply")', 'button:has-text("Quick apply")',
-                    'button:has-text("Bewerbung fortsetzen")', 'a:has-text("Bewerbung fortsetzen")',
-                    'button:has-text("Continue application")', 'a:has-text("Continue application")',
-                ]
+                all_selectors = apply_selectors
                 for sel in all_selectors:
                     apply_btn = await self._page.query_selector(sel)
                     if apply_btn and await apply_btn.is_visible():
@@ -2250,11 +2323,23 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     pass
 
                 if external_only:
+                    # Try to extract the employer apply URL
+                    ext_url = ""
+                    try:
+                        for l in all_link_texts:
+                            if any(kw in l["text"] for kw in ["arbeitgeberseite", "employer website", "visit employer"]):
+                                if l.get("href") and l["href"] != "":
+                                    ext_url = l["href"]
+                                    break
+                    except:
+                        pass
                     await self.log("info", "apply", "external_only", {
-                        "message": f"  External-only job (no Easy Apply) — skipping",
+                        "message": f"  External-only job — saved to external list" + (f" ({ext_url[:60]})" if ext_url else ""),
                     }, job_id=job.id, platform="xing")
                     application.status = "external"
-                    application.error_log = "External apply only — no Xing Easy Apply"
+                    application.error_log = f"External apply only — no Xing Easy Apply" + (f"\nEmployer URL: {ext_url}" if ext_url else "")
+                    if ext_url:
+                        application.notes = ext_url
                     db.commit()
                     self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
@@ -2309,8 +2394,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 btn_texts.append(t)
                         except:
                             pass
-                    await self.log("warn", "apply", "no_button", {
-                        "message": f"  No Xing apply button found. Buttons: {btn_texts[:8]}",
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  No Xing apply button — saved to external list",
                     }, job_id=job.id, platform="xing")
                     application.status = "external"
                     application.error_log = "No apply button (may be external apply)"
@@ -2347,11 +2432,12 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 # Detect external redirect — if we left xing.com, skip this job
                 target_url = target_page.url.lower()
                 if "xing.com" not in target_url and "xing.com" not in self._page.url.lower():
-                    await self.log("warn", "apply", "external_redirect", {
-                        "message": f"  External redirect to {target_url[:80]} — skipping (not a Xing Easy Apply)",
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  External redirect — saved to external list ({target_url[:80]})",
                     }, job_id=job.id, platform="xing")
                     application.status = "external"
                     application.error_log = f"External apply: {target_url[:200]}"
+                    application.notes = target_page.url
                     db.commit()
                     self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
@@ -3395,8 +3481,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 btn_texts.append(t)
                         except:
                             pass
-                    await self.log("warn", "apply", "no_button", {
-                        "message": f"  No Indeed apply button found. Buttons: {btn_texts[:8]}",
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  No Indeed apply button — saved to external list",
                     }, job_id=job.id, platform="indeed")
                     application.status = "external"
                     application.error_log = "No apply button found"
@@ -3433,11 +3519,12 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 # Detect external redirect — if we left indeed.com, skip
                 target_url = target_page.url.lower()
                 if "indeed.com" not in target_url and "indeed.com" not in self._page.url.lower():
-                    await self.log("warn", "apply", "external_redirect", {
-                        "message": f"  External redirect to {target_url[:80]} — skipping",
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  External redirect — saved to external list ({target_url[:80]})",
                     }, job_id=job.id, platform="indeed")
                     application.status = "external"
                     application.error_log = f"External apply: {target_url[:200]}"
+                    application.notes = target_page.url
                     db.commit()
                     self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
@@ -4287,6 +4374,9 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                             "message": f"  No Easy Apply — diag error: {diag_err}",
                         }, job_id=job.id, platform="linkedin")
                     await self.screenshot("linkedin_no_easy_apply")
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  External-only job — saved to external list",
+                    }, job_id=job.id, platform="linkedin")
                     application.status = "external"
                     application.error_log = "No Easy Apply button"
                     db.commit()
@@ -4302,8 +4392,13 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
                 # Check if external redirect
                 if "linkedin.com" not in page.url.lower():
+                    ext_redirect = page.url[:100]
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  External redirect — saved to external list ({ext_redirect})",
+                    }, job_id=job.id, platform="linkedin")
                     application.status = "external"
-                    application.error_log = f"External redirect: {page.url[:100]}"
+                    application.error_log = f"External redirect: {ext_redirect}"
+                    application.notes = page.url
                     db.commit()
                     self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
