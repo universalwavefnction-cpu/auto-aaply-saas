@@ -31,10 +31,24 @@ def _normalize_german(text: str) -> str:
     return text
 
 
+# Related job titles / synonyms — if user searches "kellner", accept "servicekraft" etc.
+_JOB_SYNONYMS: dict[str, set[str]] = {
+    "kellner": {"service", "servicekraft", "servicekrafte", "servicemitarbeiter", "bedienung", "gastronomie", "systemgastronomie", "restaurant", "barkeeper", "barista", "rezeptionist", "bankett", "catering", "buffet", "hotelfachmann", "hotelfachfrau", "empfang", "front office", "kassenkraft"},
+    "barista": {"cafe", "coffee", "kellner", "service", "gastronomie"},
+    "koch": {"kuche", "kuchenhilfe", "kuchenleiter", "gastronomie", "chefkoch", "beikoch", "souschef"},
+    "verkaufer": {"verkauf", "fachverkaufer", "einzelhandel", "handel", "kassierer", "kassenkraft"},
+    "fahrer": {"kurier", "lieferant", "zusteller", "logistik", "transport", "lkw", "chauffeur"},
+    "reinigung": {"reinigungskraft", "gebaude", "hauswirtschaft", "zimmer", "housekeeping", "raumpflege"},
+    "lager": {"lagerist", "lagermitarbeiter", "logistik", "kommissionierer", "versand"},
+    "buro": {"burokraft", "sachbearbeiter", "verwaltung", "administration", "sekretariat", "empfang"},
+    "pflege": {"pflegekraft", "altenpflege", "krankenpflege", "pflegehilfe", "pflegeassistent", "betreuer"},
+}
+
+
 def _is_title_relevant(job_title: str, search_queries: list[str], threshold: int = 60) -> bool:
     """Check if a job title is relevant to any of the search queries.
     Handles German plurals (Servicekraft/Servicekräfte), umlauts, hyphens.
-    'Servicekräfte (m/w/d)' matches 'Servicekraft'."""
+    Also checks synonym groups so "kellner" matches "Servicekraft" etc."""
     if not search_queries:
         return True
     clean_title = _normalize_german(job_title)
@@ -58,6 +72,20 @@ def _is_title_relevant(job_title: str, search_queries: list[str], threshold: int
         query_words = [w for w in q_norm.split() if len(w) > 2]
         if query_words and all(w in clean_title for w in query_words):
             return True
+        # Synonym matching: check if any synonym of the query appears in the title
+        synonyms = _JOB_SYNONYMS.get(q_norm, set())
+        for syn in synonyms:
+            if syn in clean_title or syn in compact_title:
+                return True
+        # Also check reverse: if title words are synonyms of the query
+        for syn_key, syn_set in _JOB_SYNONYMS.items():
+            if q_norm in syn_set or q_norm == syn_key:
+                # This query is related to syn_key — check if title has syn_key or its synonyms
+                if syn_key in clean_title:
+                    return True
+                for s in syn_set:
+                    if s in clean_title:
+                        return True
         # Fuzzy token_set_ratio — high threshold to avoid false positives
         score = fuzz.token_set_ratio(q_norm, clean_title)
         if score >= threshold:
@@ -1461,6 +1489,49 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await asyncio.sleep(random.uniform(2, 4))
                     await self._dismiss_consent()
                     await self._dismiss_popups()
+
+                    # Upload our selected CV to any file inputs on the Smart Apply form
+                    cv_path = profile.get("cv_path")
+                    if cv_path and os.path.exists(cv_path):
+                        try:
+                            file_inputs = await self._page.query_selector_all('input[type="file"]')
+                            for fi in file_inputs:
+                                try:
+                                    await fi.set_input_files(cv_path)
+                                    await self.log("info", "form", "cv_uploaded", {
+                                        "message": f"  Uploaded CV: {os.path.basename(cv_path)}",
+                                    }, job_id=job.id, platform=job.platform)
+                                    await asyncio.sleep(1)
+                                except Exception as e:
+                                    await self.log("warn", "form", "cv_upload_error", {
+                                        "message": f"  CV upload failed: {e}",
+                                    }, job_id=job.id, platform=job.platform)
+                        except:
+                            pass
+
+                        # Also try clicking any "Upload CV" / "Lebenslauf hochladen" button
+                        for upload_sel in [
+                            'button:has-text("Upload")', 'button:has-text("Hochladen")',
+                            'button:has-text("Lebenslauf")', 'button:has-text("CV")',
+                            'label:has-text("Upload")', 'label:has-text("Hochladen")',
+                            '[data-testid*="upload"]', '[data-testid*="cv"]',
+                        ]:
+                            try:
+                                upload_btn = await self._page.query_selector(upload_sel)
+                                if upload_btn and await upload_btn.is_visible():
+                                    # Check if this button has an associated file input
+                                    for_id = await upload_btn.get_attribute("for")
+                                    if for_id:
+                                        fi = await self._page.query_selector(f'input#{for_id}')
+                                        if fi:
+                                            await fi.set_input_files(cv_path)
+                                            await self.log("info", "form", "cv_uploaded_via_label", {
+                                                "message": f"  Uploaded CV via label: {os.path.basename(cv_path)}",
+                                            }, job_id=job.id, platform=job.platform)
+                                            await asyncio.sleep(1)
+                                            break
+                            except:
+                                continue
 
                     # Find and click "Bewerbung abschicken" / "Submit application"
                     submit_btn = None
