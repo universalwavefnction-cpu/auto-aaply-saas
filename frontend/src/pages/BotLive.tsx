@@ -14,14 +14,21 @@ interface LogEntry {
 export default function BotLive() {
   const [running, setRunning] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [stats, setStats] = useState({ applied: 0, failed: 0, skipped: 0, total: 0, fields_filled: 0, fields_total: 0 })
+  const [stats, setStats] = useState({
+    applied: 0,
+    failed: 0,
+    skipped: 0,
+    total: 0,
+    fields_filled: 0,
+    fields_total: 0,
+  })
   const [screenshotUrl, setScreenshotUrl] = useState('')
   const [status, setStatus] = useState('idle')
   const logRef = useRef<HTMLDivElement>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
-    api.getBotStatus().then(res => {
+    api.getBotStatus().then((res) => {
       if (res.running) {
         setRunning(true)
         setStatus('running')
@@ -49,7 +56,7 @@ export default function BotLive() {
       try {
         const data = JSON.parse(e.data)
         if (data.type === 'log') {
-          setLogs(prev => [...prev.slice(-500), data])
+          setLogs((prev) => [...prev.slice(-500), data])
         } else if (data.type === 'progress') {
           setStats(data.data)
         } else if (data.type === 'screenshot') {
@@ -99,50 +106,76 @@ export default function BotLive() {
 
   const levelColor = (level?: string) => {
     switch (level) {
-      case 'error': return 'text-red-400'
-      case 'warn': return 'text-amber-400'
-      case 'info': return 'text-white/60'
-      default: return 'text-white/30'
+      case 'error':
+        return 'text-red-400'
+      case 'warn':
+        return 'text-amber-400'
+      case 'info':
+        return 'text-white/60'
+      default:
+        return 'text-white/30'
     }
   }
 
   const eventIcon = (event?: string) => {
     switch (event) {
-      case 'success': return '✓'
-      case 'error': case 'crash': return '✗'
-      case 'field_filled': return '●'
-      case 'field_skipped': return '○'
-      case 'screenshot': return '📸'
-      case 'button_found': return '→'
-      case 'clicking_apply': return '⚡'
-      case 'submitting': return '↑'
-      default: return '›'
+      case 'success':
+        return '✓'
+      case 'error':
+      case 'crash':
+        return '✗'
+      case 'field_filled':
+        return '●'
+      case 'field_skipped':
+        return '○'
+      case 'screenshot':
+        return '📸'
+      case 'button_found':
+        return '→'
+      case 'clicking_apply':
+        return '⚡'
+      case 'submitting':
+        return '↑'
+      default:
+        return '›'
     }
   }
 
-  const progress = stats.total > 0 ? ((stats.applied + stats.failed + stats.skipped) / stats.total) * 100 : 0
+  const progress =
+    stats.total > 0 ? ((stats.applied + stats.failed + stats.skipped) / stats.total) * 100 : 0
 
   return (
-    <div className="p-8 h-full flex flex-col space-y-4">
+    <div className="flex h-full flex-col space-y-4 p-8">
       {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex shrink-0 items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-amber-500/10 rounded-md">
-            <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z" strokeLinecap="round" strokeWidth="2.5"/>
+          <div className="rounded-md bg-amber-500/10 p-1.5">
+            <svg
+              className="h-4 w-4 text-amber-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" strokeLinecap="round" strokeWidth="2.5" />
             </svg>
           </div>
-          <span className="uppercase font-black tracking-[0.2em] text-[11px] text-white/60">Live Bot</span>
+          <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white/60">
+            Live Bot
+          </span>
           {running && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/20 bg-amber-500/5">
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
-              <span className="text-[7px] font-bold text-amber-500 uppercase tracking-widest">{status}</span>
+            <div className="flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-0.5">
+              <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></div>
+              <span className="text-[7px] font-bold uppercase tracking-widest text-amber-500">
+                {status}
+              </span>
             </div>
           )}
           {!running && status === 'complete' && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[#27C93F]/20 bg-[#27C93F]/5">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#27C93F]"></div>
-              <span className="text-[7px] font-bold text-[#27C93F] uppercase tracking-widest">Complete</span>
+            <div className="flex items-center gap-1.5 rounded-md border border-[#27C93F]/20 bg-[#27C93F]/5 px-2 py-0.5">
+              <div className="h-1.5 w-1.5 rounded-full bg-[#27C93F]"></div>
+              <span className="text-[7px] font-bold uppercase tracking-widest text-[#27C93F]">
+                Complete
+              </span>
             </div>
           )}
         </div>
@@ -150,22 +183,30 @@ export default function BotLive() {
         <div className="flex gap-2">
           {!running ? (
             <>
-              <button onClick={() => startBot('scrape_and_apply')}
-                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all">
+              <button
+                onClick={() => startBot('scrape_and_apply')}
+                className="rounded-xl bg-amber-500 px-5 py-2.5 text-[10px] font-black uppercase tracking-wider text-white shadow-lg shadow-amber-500/20 transition-all hover:bg-amber-600"
+              >
                 Start Full Cycle
               </button>
-              <button onClick={() => startBot('scrape')}
-                className="px-4 py-2.5 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold text-white/40 uppercase tracking-wider hover:text-amber-500 transition-colors">
+              <button
+                onClick={() => startBot('scrape')}
+                className="rounded-xl border border-white/5 bg-white/5 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-white/40 transition-colors hover:text-amber-500"
+              >
                 Scrape Only
               </button>
-              <button onClick={() => startBot('apply')}
-                className="px-4 py-2.5 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold text-white/40 uppercase tracking-wider hover:text-amber-500 transition-colors">
+              <button
+                onClick={() => startBot('apply')}
+                className="rounded-xl border border-white/5 bg-white/5 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-white/40 transition-colors hover:text-amber-500"
+              >
                 Apply Only
               </button>
             </>
           ) : (
-            <button onClick={stopBot}
-              className="px-5 py-2.5 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all">
+            <button
+              onClick={stopBot}
+              className="rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-2.5 text-[10px] font-black uppercase tracking-wider text-red-400 transition-all hover:bg-red-500/20"
+            >
               Stop Bot
             </button>
           )}
@@ -174,40 +215,59 @@ export default function BotLive() {
 
       {/* Progress Bar */}
       {stats.total > 0 && (
-        <div className="bg-[#0A0A0A] border border-white/5 rounded-xl p-4 shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em]">Progress</span>
+        <div className="shrink-0 rounded-xl border border-white/5 bg-[#0A0A0A] p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/15">
+              Progress
+            </span>
             <div className="flex gap-4 text-[10px] font-bold">
               <span className="text-[#27C93F]">{stats.applied} applied</span>
               <span className="text-red-400">{stats.failed} failed</span>
               <span className="text-white/30">{stats.skipped} skipped</span>
-              <span className="text-white/20">{stats.applied + stats.failed + stats.skipped}/{stats.total}</span>
+              <span className="text-white/20">
+                {stats.applied + stats.failed + stats.skipped}/{stats.total}
+              </span>
             </div>
           </div>
-          <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
-            <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-white/5">
+            <div
+              className="h-full rounded-full bg-amber-500 transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            ></div>
           </div>
           {stats.fields_total > 0 && (
             <div className="mt-2 text-[9px] text-white/20">
-              Form fill rate: <span className="text-amber-500 font-bold">{Math.round((stats.fields_filled / stats.fields_total) * 100)}%</span> ({stats.fields_filled}/{stats.fields_total} fields)
+              Form fill rate:{' '}
+              <span className="font-bold text-amber-500">
+                {Math.round((stats.fields_filled / stats.fields_total) * 100)}%
+              </span>{' '}
+              ({stats.fields_filled}/{stats.fields_total} fields)
             </div>
           )}
         </div>
       )}
 
       {/* Activity Log — Full Width */}
-      <div className="flex-1 bg-[#0A0A0A] border border-white/5 rounded-xl overflow-hidden flex flex-col min-h-0">
-        <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between shrink-0">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-white/5 bg-[#0A0A0A]">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/5 px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-amber-500 font-black">_</span>
-            <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em]">Activity Log</span>
+            <span className="font-black text-amber-500">_</span>
+            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/15">
+              Activity Log
+            </span>
           </div>
           <span className="text-[8px] font-bold text-white/10">{logs.length} events</span>
         </div>
-        <div ref={logRef} className="flex-1 overflow-auto p-3 font-mono text-[11px] space-y-0.5 custom-scrollbar">
+        <div
+          ref={logRef}
+          className="custom-scrollbar flex-1 space-y-0.5 overflow-auto p-3 font-mono text-[11px]"
+        >
           {logs.map((log, i) => (
-            <div key={i} className={`flex gap-2 px-1 py-0.5 rounded hover:bg-white/[0.02] ${levelColor(log.level)}`}>
-              <span className="text-white/10 w-16 shrink-0 tabular-nums">
+            <div
+              key={i}
+              className={`flex gap-2 rounded px-1 py-0.5 hover:bg-white/[0.02] ${levelColor(log.level)}`}
+            >
+              <span className="w-16 shrink-0 tabular-nums text-white/10">
                 {log.ts?.split('T')[1]?.slice(0, 8) || ''}
               </span>
               <span className="w-4 shrink-0 text-center">{eventIcon(log.event)}</span>
@@ -215,13 +275,15 @@ export default function BotLive() {
             </div>
           ))}
           {logs.length === 0 && !running && (
-            <div className="text-white/10 text-center py-10">
+            <div className="py-10 text-center text-white/10">
               <p className="text-[11px] font-black uppercase tracking-[0.2em]">Ready</p>
-              <p className="text-[10px] mt-1">Click "Start Full Cycle" to begin</p>
+              <p className="mt-1 text-[10px]">Click "Start Full Cycle" to begin</p>
             </div>
           )}
           {running && (
-            <div className="text-amber-500 animate-pulse font-bold tracking-widest text-lg px-1">_</div>
+            <div className="animate-pulse px-1 text-lg font-bold tracking-widest text-amber-500">
+              _
+            </div>
           )}
         </div>
       </div>

@@ -113,6 +113,67 @@ Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
 Object.defineProperty(navigator, 'languages', {get: () => ['de-DE', 'de', 'en']});
 """
 
+# Enhanced stealth script for LinkedIn (comprehensive anti-detection)
+_STEALTH_SCRIPT_FULL = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined, configurable: true});
+delete navigator.__proto__.webdriver;
+Object.defineProperty(navigator, 'plugins', {
+    get: () => {
+        const p = [{name:'Chrome PDF Plugin',filename:'internal-pdf-viewer',description:'Portable Document Format'},
+                    {name:'Chrome PDF Viewer',filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai',description:''},
+                    {name:'Native Client',filename:'internal-nacl-plugin',description:''}];
+        p.length = 3; p.item = i => p[i]; p.namedItem = n => p.find(x => x.name === n) || null; p.refresh = () => {};
+        return p;
+    }, configurable: true
+});
+Object.defineProperty(navigator, 'languages', {get: () => ['de-DE','de','en-US','en'], configurable: true});
+if (!window.chrome) window.chrome = {};
+window.chrome.runtime = {connect:()=>{},sendMessage:()=>{},onMessage:{addListener:()=>{},removeListener:()=>{}},id:undefined};
+window.chrome.app = {isInstalled:false,InstallState:{DISABLED:'disabled',INSTALLED:'installed',NOT_INSTALLED:'not_installed'},RunningState:{CANNOT_RUN:'cannot_run',READY_TO_RUN:'ready_to_run',RUNNING:'running'}};
+window.chrome.csi = () => ({}); window.chrome.loadTimes = () => ({});
+const origQ = window.navigator.permissions?.query;
+if (origQ) { window.navigator.permissions.query = p => p.name==='notifications' ? Promise.resolve({state:Notification.permission,onchange:null}) : origQ.call(navigator.permissions,p); }
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8, configurable: true});
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8, configurable: true});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32', configurable: true});
+Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.', configurable: true});
+Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0, configurable: true});
+const gpH = {apply:(t,a,args) => {if(args[0]===37445) return 'Intel Inc.'; if(args[0]===37446) return 'Intel Iris OpenGL Engine'; return Reflect.apply(t,a,args);}};
+try { const gc = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function(t,a) { const c = gc.call(this,t,a); if(c&&(t==='webgl'||t==='webgl2'||t==='experimental-webgl')) { c.getParameter = new Proxy(c.getParameter.bind(c), gpH); } return c; }; } catch(e) {}
+if (window.outerWidth === 0) Object.defineProperty(window, 'outerWidth', {get: () => window.innerWidth});
+if (window.outerHeight === 0) Object.defineProperty(window, 'outerHeight', {get: () => window.innerHeight + 100});
+window.Notification = window.Notification || {permission:'default'};
+window.speechSynthesis = window.speechSynthesis || {getVoices:()=>[]};
+"""
+
+# User agent pool for LinkedIn (rotate per session)
+_UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+]
+
+# LinkedIn question-answer patterns (bilingual DE/EN)
+_LINKEDIN_QA: dict[str, str] = {
+    "authorized to work": "Yes", "legally authorized": "Yes", "work authorization": "Yes",
+    "work permit": "Yes", "right to work": "Yes", "eligible to work": "Yes",
+    "arbeitsgenehmigung": "Yes", "arbeitserlaubnis": "Yes", "arbeitsberechtigung": "Yes",
+    "sponsorship": "No", "visa sponsorship": "No", "require sponsorship": "No",
+    "visum": "No", "visumsponsoring": "No",
+    "relocation": "Yes", "willing to relocate": "Yes", "umzug": "Yes", "umziehen": "Yes",
+    "commute": "Yes", "work on-site": "Yes", "hybrid": "Yes", "remote": "Yes",
+    "pendeln": "Yes", "vor ort": "Yes", "homeoffice": "Yes",
+    "background check": "Yes", "drug test": "Yes", "führungszeugnis": "Yes",
+    "start immediately": "Yes", "notice period": "2 weeks", "earliest start": "Immediately",
+    "availability": "Immediately", "kündigungsfrist": "2 Wochen",
+    "verfügbarkeit": "Sofort", "eintrittsdatum": "Sofort", "ab wann": "Sofort",
+    "degree": "Yes", "bachelor": "Yes", "education": "Yes",
+    "abschluss": "Yes", "ausbildung": "Yes",
+}
+
 
 class BotEngine:
     def __init__(self, user_id: int):
@@ -191,9 +252,12 @@ class BotEngine:
         if not self._page:
             return
         try:
+            # Save both latest (for live view) and labeled (for debugging)
             filename = f"{self.user_id}_latest.png"
             path = SCREENSHOT_DIR / filename
             await self._page.screenshot(path=str(path))
+            labeled_path = SCREENSHOT_DIR / f"{self.user_id}_{label}_{int(time.time())}.png"
+            await self._page.screenshot(path=str(labeled_path))
             await self.events.put({
                 "type": "screenshot",
                 "url": f"/api/bot/screenshot/latest?t={int(time.time())}",
@@ -772,6 +836,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     scraped_job_ids = await self._scrape_phase_xing(db, job_filter, profile)
                 elif platform == "indeed":
                     scraped_job_ids = await self._scrape_phase_indeed(db, job_filter, profile)
+                elif platform == "linkedin":
+                    scraped_job_ids = await self._scrape_phase_linkedin(db, job_filter, profile)
                 else:
                     scraped_job_ids = await self._scrape_phase(db, job_filter, profile)
 
@@ -781,6 +847,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await self._apply_phase_xing(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
                 elif platform == "indeed":
                     await self._apply_phase_indeed(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
+                elif platform == "linkedin":
+                    await self._apply_phase_linkedin(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
                 else:
                     await self._apply_phase(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
 
@@ -1358,7 +1426,6 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 # Find apply button — try full apply first, then Schnellbewerbung
                 apply_btn = None
                 btn_text = ""
-                apply_type = "full"  # "full" or "interest"
                 for sel in [
                     'a:has-text("Jetzt bewerben")',
                     'button:has-text("Jetzt bewerben")',
@@ -1383,23 +1450,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         break
                     apply_btn = None
 
-                # Fall back to "Ich bin interessiert" / "I'm interested" (Schnellbewerbung)
-                if not apply_btn:
-                    for sel in [
-                        'button:has-text("Ich bin interessiert")',
-                        'a:has-text("Ich bin interessiert")',
-                        "button:has-text(\"I'm interested\")",
-                        "a:has-text(\"I'm interested\")",
-                    ]:
-                        apply_btn = await self._page.query_selector(sel)
-                        if apply_btn and await apply_btn.is_visible():
-                            btn_text = (await apply_btn.inner_text()).strip()
-                            apply_type = "interest"
-                            await self.log("info", "apply", "interest_button", {
-                                "message": f"  Schnellbewerbung: \"{btn_text}\"",
-                            }, job_id=job.id, platform=job.platform)
-                            break
-                        apply_btn = None
+                # Skip "Ich bin interessiert" / "I'm interested" — these are NOT real applications
+                # (user receives no confirmation email, StepStone just records interest)
 
                 if not apply_btn:
                     # Debug: log what buttons actually exist on page
@@ -1415,10 +1467,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         "message": f"  No apply button found — skipping. Buttons on page: {btn_texts[:8]}",
                         "buttons_found": btn_texts,
                     }, job_id=job.id, platform=job.platform)
-                    application.status = "skipped"
+                    application.status = "external"
                     application.error_log = "No apply button found on page"
                     db.commit()
-                    self.stats["skipped"] += 1
+                    self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
                     continue
 
@@ -1450,9 +1502,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 all_selectors = [
                     'a:has-text("Jetzt bewerben")', 'button:has-text("Jetzt bewerben")',
                     'a:has-text("Apply now")', 'button:has-text("Apply now")',
+                    'a:has-text("Schnelle Bewerbung")', 'button:has-text("Schnelle Bewerbung")',
+                    'a:has-text("Quick apply")', 'button:has-text("Quick apply")',
                     'button:has-text("Bewerbung fortsetzen")', 'a:has-text("Bewerbung fortsetzen")',
-                    'button:has-text("Ich bin interessiert")', 'a:has-text("Ich bin interessiert")',
-                    "button:has-text(\"I'm interested\")", "a:has-text(\"I'm interested\")",
+                    'button:has-text("Continue application")', 'a:has-text("Continue application")',
                 ]
                 for sel in all_selectors:
                     apply_btn = await self._page.query_selector(sel)
@@ -1661,127 +1714,6 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         })
                         await asyncio.sleep(delay)
                     continue
-
-                # Check if a login/register modal appeared (not logged in)
-                if apply_type == "interest":
-                    page_text = (await self._page.inner_text("body")).lower()
-                    if any(kw in page_text for kw in ["anmelden oder registrieren", "log in or register"]):
-                        await self.log("error", "apply", "not_logged_in", {
-                            "message": "  NOT LOGGED IN — login modal appeared",
-                        }, job_id=job.id, platform=job.platform)
-                        application.status = "failed"
-                        application.error_log = "Not logged in"
-                        db.commit()
-                        self.stats["failed"] += 1
-                        await self.emit_progress()
-                        continue
-
-                    # If we're still on the same job page, retry once with page reload
-                    if current_url == old_url:
-                        await self.log("warn", "apply", "click_no_effect", {
-                            "message": "  Click had no effect — retrying after page reload...",
-                        }, job_id=job.id, platform=job.platform)
-
-                        # Reload page and try again
-                        await self._page.reload(timeout=30000, wait_until="domcontentloaded")
-                        await asyncio.sleep(random.uniform(3, 5))
-                        await self._dismiss_consent()
-                        await self._dismiss_popups()
-                        await self._page.evaluate("""() => {
-                            document.querySelectorAll('[id*="portal"]').forEach(e => e.remove());
-                            document.querySelectorAll('[data-genesis-element="DRAWER_OVERLAY"]').forEach(e => e.remove());
-                            document.querySelectorAll('[class*="backdrop"], [class*="Backdrop"]').forEach(e => e.remove());
-                            document.querySelectorAll('div').forEach(e => {
-                                const s = window.getComputedStyle(e);
-                                if (s.position === 'fixed' && s.zIndex > 100 && e.id !== 'onetrust-consent-sdk') e.remove();
-                            });
-                            document.body.style.overflow = 'auto';
-                            document.body.style.pointerEvents = 'auto';
-                        }""")
-                        await asyncio.sleep(1)
-
-                        # Re-find and re-click
-                        retry_btn = None
-                        for sel in ['button:has-text("Ich bin interessiert")', "button:has-text(\"I'm interested\")",
-                                    'button:has-text("Bewerbung fortsetzen")', 'button:has-text("Continue application")']:
-                            retry_btn = await self._page.query_selector(sel)
-                            if retry_btn and await retry_btn.is_visible():
-                                break
-                            retry_btn = None
-
-                        if retry_btn:
-                            await retry_btn.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.5)
-                            old_url2 = self._page.url
-                            await retry_btn.evaluate("el => el.click()")
-                            for _wait in range(8):
-                                await asyncio.sleep(1)
-                                if self._page.url != old_url2:
-                                    break
-                            current_url = self._page.url
-
-                            if current_url != old_url2:
-                                # Retry worked! Check for success flows
-                                if "confirmation/success" in current_url or "success" in current_url:
-                                    application.status = "success"
-                                    self.stats["applied"] += 1
-                                    await self.log("info", "apply", "success", {
-                                        "message": f"  SUCCESS (retry) — Application auto-submitted",
-                                    }, job_id=job.id, platform=job.platform)
-                                    db.commit()
-                                    await self.emit_progress()
-                                    if i < len(jobs) - 1 and self.running:
-                                        await asyncio.sleep(random.uniform(15, 25))
-                                    continue
-                                elif "smart-apply" in current_url or "application" in current_url:
-                                    await self.log("info", "apply", "smart_apply_retry", {
-                                        "message": "  Retry navigated to smart-apply form",
-                                    }, job_id=job.id, platform=job.platform)
-                                    # Fall through to smart-apply handling below won't work here,
-                                    # so handle inline
-                                    await asyncio.sleep(random.uniform(2, 4))
-                                    await self._dismiss_consent()
-                                    submit_btn = None
-                                    for sel in ['button:has-text("Bewerbung abschicken")', 'button:has-text("Submit application")',
-                                                'button:has-text("Send application")', 'button[type="submit"]']:
-                                        submit_btn = await self._page.query_selector(sel)
-                                        if submit_btn and await submit_btn.is_visible():
-                                            break
-                                        submit_btn = None
-                                    if submit_btn:
-                                        try:
-                                            await submit_btn.click(timeout=5000)
-                                        except Exception:
-                                            await submit_btn.evaluate("el => el.click()")
-                                        await asyncio.sleep(random.uniform(4, 6))
-                                        after_url = self._page.url
-                                        if "success" in after_url or "confirmation" in after_url:
-                                            application.status = "success"
-                                            self.stats["applied"] += 1
-                                            await self.log("info", "apply", "success", {
-                                                "message": f"  SUCCESS (retry+submit)",
-                                            }, job_id=job.id, platform=job.platform)
-                                        else:
-                                            application.status = "failed"
-                                            application.error_log = "Retry: submit uncertain"
-                                            self.stats["failed"] += 1
-                                    else:
-                                        application.status = "failed"
-                                        application.error_log = "Retry: no submit button"
-                                        self.stats["failed"] += 1
-                                    db.commit()
-                                    await self.emit_progress()
-                                    if i < len(jobs) - 1 and self.running:
-                                        await asyncio.sleep(random.uniform(15, 25))
-                                    continue
-
-                        # Retry also failed
-                        application.status = "failed"
-                        application.error_log = "Interest click had no effect (even after retry)"
-                        db.commit()
-                        self.stats["failed"] += 1
-                        await self.emit_progress()
-                        continue
 
                 # Full application — check if redirected to login
                 page_text = await self._page.inner_text("body")
@@ -2321,10 +2253,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await self.log("info", "apply", "external_only", {
                         "message": f"  External-only job (no Easy Apply) — skipping",
                     }, job_id=job.id, platform="xing")
-                    application.status = "skipped"
+                    application.status = "external"
                     application.error_log = "External apply only — no Xing Easy Apply"
                     db.commit()
-                    self.stats["skipped"] += 1
+                    self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
                     continue
 
@@ -2380,10 +2312,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await self.log("warn", "apply", "no_button", {
                         "message": f"  No Xing apply button found. Buttons: {btn_texts[:8]}",
                     }, job_id=job.id, platform="xing")
-                    application.status = "skipped"
+                    application.status = "external"
                     application.error_log = "No apply button (may be external apply)"
                     db.commit()
-                    self.stats["skipped"] += 1
+                    self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
                     continue
 
@@ -2418,10 +2350,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await self.log("warn", "apply", "external_redirect", {
                         "message": f"  External redirect to {target_url[:80]} — skipping (not a Xing Easy Apply)",
                     }, job_id=job.id, platform="xing")
-                    application.status = "skipped"
+                    application.status = "external"
                     application.error_log = f"External apply: {target_url[:200]}"
                     db.commit()
-                    self.stats["skipped"] += 1
+                    self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
                     if new_pages and not new_pages[0].is_closed():
                         await new_pages[0].close()
@@ -2667,19 +2599,137 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
         except:
             pass
 
+    @staticmethod
+    def _fetch_indeed_code_from_gmail(email: str, app_password: str, timeout_s: int = 90, sender: str = "indeed") -> str | None:
+        """Poll Gmail via IMAP for the latest verification code from a sender."""
+        import imaplib
+        import email as email_lib
+        from email.header import decode_header
+
+        deadline = time.time() + timeout_s
+        seen_ids: set[str] = set()
+
+        while time.time() < deadline:
+            try:
+                mail = imaplib.IMAP4_SSL("imap.gmail.com")
+                mail.login(email, app_password)
+                mail.select("INBOX")
+
+                # Search for recent emails from sender
+                _, msg_ids = mail.search(None, f'(FROM "{sender}" UNSEEN)')
+                if not msg_ids or not msg_ids[0]:
+                    _, msg_ids = mail.search(None, f'(FROM "{sender}")')
+
+                ids = msg_ids[0].split() if msg_ids[0] else []
+                # Check newest first
+                for mid in reversed(ids[-10:]):
+                    mid_str = mid.decode()
+                    if mid_str in seen_ids:
+                        continue
+                    seen_ids.add(mid_str)
+
+                    _, data = mail.fetch(mid, "(RFC822)")
+                    raw = data[0][1]
+                    msg = email_lib.message_from_bytes(raw)
+
+                    # Get body
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            ct = part.get_content_type()
+                            if ct == "text/plain":
+                                body = part.get_payload(decode=True).decode(errors="replace")
+                                break
+                            elif ct == "text/html":
+                                body = part.get_payload(decode=True).decode(errors="replace")
+                    else:
+                        body = msg.get_payload(decode=True).decode(errors="replace")
+
+                    # Extract code — Indeed sends 6-8 digit codes
+                    import re as _re
+                    # Look for standalone 6-8 digit number (the code)
+                    code_match = _re.search(r'\b(\d{6,8})\b', body)
+                    if code_match:
+                        mail.logout()
+                        return code_match.group(1)
+
+                mail.logout()
+            except Exception:
+                pass
+
+            time.sleep(5)
+
+        return None
+
     async def _login_indeed(self, page, cred) -> bool:
-        """Log into Indeed."""
+        """Log into Indeed — handles password, Google OAuth, and code-based login."""
         await self.log("info", "apply", "login_start", {
             "message": f"Logging into Indeed as {cred.email}...",
         }, platform="indeed")
 
         try:
-            await page.goto("https://secure.indeed.com/account/login?hl=de_DE", timeout=20000)
+            await page.goto("https://secure.indeed.com/account/login?hl=de_DE", timeout=45000)
             await asyncio.sleep(random.uniform(3, 5))
+
+            # Wait for Cloudflare / Turnstile challenge
+            for _cf in range(20):  # up to ~60s
+                title = await page.title()
+                body_text = (await page.inner_text("body")).lower()
+                has_cf = (
+                    "just a moment" in title.lower()
+                    or "verifizierung" in body_text
+                    or "checking" in body_text
+                    or "verify you are human" in body_text
+                    or "bestätigen sie" in body_text
+                )
+                if not has_cf:
+                    break
+                # Try clicking Turnstile widget — click the iframe element itself
+                clicked = False
+                for sel in [
+                    'iframe[src*="challenges.cloudflare.com"]',
+                    '.cf-turnstile iframe',
+                    'iframe[title*="Cloudflare"]',
+                    'iframe[title*="Widget"]',
+                ]:
+                    cf_el = await page.query_selector(sel)
+                    if cf_el:
+                        try:
+                            bbox = await cf_el.bounding_box()
+                            if bbox:
+                                # Click center of the checkbox area (left side of iframe)
+                                await page.mouse.click(
+                                    bbox["x"] + 28,
+                                    bbox["y"] + bbox["height"] / 2,
+                                )
+                                clicked = True
+                                await self.log("info", "apply", "cf_click", {
+                                    "message": "  Clicked Cloudflare Turnstile widget",
+                                }, platform="indeed")
+                        except Exception:
+                            pass
+                        break
+                if not clicked:
+                    # Also try frame-internal click
+                    for sel in ['iframe[src*="challenges"]', 'iframe[src*="turnstile"]']:
+                        cf_el = await page.query_selector(sel)
+                        if cf_el:
+                            try:
+                                frame = await cf_el.content_frame()
+                                if frame:
+                                    cb = await frame.query_selector('#challenge-stage input, label, .cb-i, .ctp-checkbox-container')
+                                    if cb:
+                                        await cb.click()
+                                        clicked = True
+                            except Exception:
+                                pass
+                            break
+                await asyncio.sleep(3)
+
             await self._dismiss_indeed_cookies(page)
             await self.screenshot("indeed_login_01")
 
-            # Indeed login: email first, then password on next screen (or same page)
+            # Indeed login: email first
             email_input = (
                 await page.query_selector('input[type="email"]') or
                 await page.query_selector('input[name="__email"]') or
@@ -2714,7 +2764,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             await asyncio.sleep(random.uniform(3, 5))
             await self.screenshot("indeed_login_02_after_email")
 
-            # Now enter password (may be on same page or new page)
+            # Check what login method Indeed offers
+            page_text = (await page.inner_text("body")).lower()
+
+            # Path A: Password field available
             pw_input = (
                 await page.query_selector('input[type="password"]') or
                 await page.query_selector('input[name="__password"]')
@@ -2727,7 +2780,6 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     "message": "  Entered password",
                 }, platform="indeed")
 
-                # Submit
                 submit_btn = (
                     await page.query_selector('button[type="submit"]') or
                     await page.query_selector('button:has-text("Sign in")') or
@@ -2739,12 +2791,139 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await pw_input.press("Enter")
 
                 await asyncio.sleep(random.uniform(4, 6))
-            else:
-                # Indeed sometimes uses magic link / phone verification — no password field
-                await self.log("warn", "apply", "login_no_password", {
-                    "message": "  No password field — Indeed may require verification",
+
+            # Path B: Code-based login ("Stattdessen mit Code anmelden")
+            elif "code" in page_text or "mit code" in page_text or "stattdessen" in page_text:
+                await self.log("info", "apply", "login_code_flow", {
+                    "message": "  Indeed requires code-based login — initiating...",
                 }, platform="indeed")
-                await self.screenshot("indeed_login_no_password")
+
+                # Check if Gmail IMAP is configured
+                gmail_email = settings.GMAIL_EMAIL
+                gmail_app_pw = settings.GMAIL_APP_PASSWORD
+                if not gmail_email or not gmail_app_pw:
+                    await self.log("error", "apply", "login_no_gmail", {
+                        "message": "  Code login requires GMAIL_EMAIL + GMAIL_APP_PASSWORD in .env",
+                    }, platform="indeed")
+                    return False
+
+                # Click "Stattdessen mit Code anmelden" / "Sign in with code"
+                code_link = (
+                    await page.query_selector('a:has-text("Code")') or
+                    await page.query_selector('a:has-text("code")') or
+                    await page.query_selector('a:has-text("Stattdessen")')
+                )
+                if code_link:
+                    await code_link.click()
+                    await asyncio.sleep(random.uniform(2, 4))
+                    await self.screenshot("indeed_login_code_page")
+
+                # Enter email again if needed
+                code_email_input = await page.query_selector('input[type="email"]')
+                if code_email_input:
+                    await code_email_input.fill("")
+                    await code_email_input.type(cred.email, delay=random.randint(30, 70))
+                    await asyncio.sleep(0.5)
+
+                # Click send code / continue
+                send_btn = (
+                    await page.query_selector('button[type="submit"]') or
+                    await page.query_selector('button:has-text("Send")') or
+                    await page.query_selector('button:has-text("Senden")') or
+                    await page.query_selector('button:has-text("Continue")') or
+                    await page.query_selector('button:has-text("Weiter")')
+                )
+                if send_btn and await send_btn.is_visible():
+                    await send_btn.click()
+                    await self.log("info", "apply", "login_code_sent", {
+                        "message": "  Code requested — checking Gmail...",
+                    }, platform="indeed")
+                    await asyncio.sleep(5)
+                else:
+                    await self.log("warn", "apply", "login_no_send_btn", {
+                        "message": "  No send button found for code flow",
+                    }, platform="indeed")
+                    return False
+
+                await self.screenshot("indeed_login_waiting_code")
+
+                # Poll Gmail for the verification code
+                code = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self._fetch_indeed_code_from_gmail,
+                    gmail_email, gmail_app_pw, 90
+                )
+
+                if not code:
+                    await self.log("error", "apply", "login_no_code", {
+                        "message": "  No verification code found in Gmail after 90s",
+                    }, platform="indeed")
+                    return False
+
+                await self.log("info", "apply", "login_code_found", {
+                    "message": f"  Got verification code: {code}",
+                }, platform="indeed")
+
+                # Enter the code
+                code_input = (
+                    await page.query_selector('input[type="text"]') or
+                    await page.query_selector('input[type="number"]') or
+                    await page.query_selector('input[name="otp"]') or
+                    await page.query_selector('input[inputmode="numeric"]')
+                )
+                if code_input:
+                    await code_input.click()
+                    await asyncio.sleep(0.3)
+                    await code_input.type(code, delay=random.randint(50, 100))
+                    await asyncio.sleep(0.5)
+
+                    # Submit code
+                    submit_btn = (
+                        await page.query_selector('button[type="submit"]') or
+                        await page.query_selector('button:has-text("Verify")') or
+                        await page.query_selector('button:has-text("Bestätigen")') or
+                        await page.query_selector('button:has-text("Continue")') or
+                        await page.query_selector('button:has-text("Weiter")')
+                    )
+                    if submit_btn and await submit_btn.is_visible():
+                        await submit_btn.click()
+                    else:
+                        await code_input.press("Enter")
+
+                    await asyncio.sleep(random.uniform(4, 6))
+                else:
+                    await self.log("error", "apply", "login_no_code_input", {
+                        "message": "  No code input field found",
+                    }, platform="indeed")
+                    return False
+
+            # Path C: Google OAuth only — cannot automate
+            elif "google" in page_text and "weiter mit google" in page_text:
+                # Try clicking code link first (might be below Google button)
+                code_link = (
+                    await page.query_selector('a:has-text("Code")') or
+                    await page.query_selector('a:has-text("code")') or
+                    await page.query_selector('a:has-text("Stattdessen")')
+                )
+                if code_link:
+                    await self.log("info", "apply", "login_switch_to_code", {
+                        "message": "  Google OAuth page — switching to code login...",
+                    }, platform="indeed")
+                    await code_link.click()
+                    await asyncio.sleep(random.uniform(2, 4))
+                    # Recurse with the new page state
+                    return await self._login_indeed(page, cred)
+                else:
+                    await self.log("error", "apply", "login_google_only", {
+                        "message": "  Indeed only offers Google OAuth — cannot automate",
+                    }, platform="indeed")
+                    return False
+
+            else:
+                await self.log("warn", "apply", "login_unknown_flow", {
+                    "message": "  Unknown login flow — no password or code option found",
+                }, platform="indeed")
+                await self.screenshot("indeed_login_unknown")
                 return False
 
             await self._dismiss_indeed_cookies(page)
@@ -2807,17 +2986,48 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     "query": query, "location": loc,
                 }, platform="indeed")
 
-                browser = await pw.chromium.launch(
-                    headless=True,
-                    args=['--disable-blink-features=AutomationControlled', '--disable-http2'],
-                )
-                ctx = await browser.new_context(
-                    viewport={"width": 1366, "height": 768},
-                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    locale="de-DE",
-                )
-                self._page = await ctx.new_page()
-                await self._page.add_init_script(STEALTH_JS)
+                # Retry with fresh IP if Cloudflare blocks page 1
+                _cf_retries = 0
+                _max_cf_retries = 3
+                browser = ctx = None
+
+                while _cf_retries <= _max_cf_retries:
+                    browser, ctx, self._page = await self._launch_stealth_browser(pw, "indeed")
+                    # Quick test: load page 1 and check for Cloudflare block
+                    _test_url = f"https://de.indeed.com/jobs?q={q_enc}&l={l_enc}"
+                    try:
+                        await self._page.goto(_test_url, timeout=45000, wait_until="domcontentloaded")
+                        await asyncio.sleep(random.uniform(5, 8))
+                        _test_body = (await self._page.inner_text("body"))[:500].lower()
+                        if any(kw in _test_body for kw in ["verifizierung", "bestätigen sie", "verify"]):
+                            _cf_retries += 1
+                            await self.log("warn", "scrape", "cf_blocked", {
+                                "message": f"  Cloudflare blocked — rotating IP (attempt {_cf_retries}/{_max_cf_retries})",
+                            }, platform="indeed")
+                            await browser.close()
+                            browser = ctx = None
+                            if _cf_retries > _max_cf_retries:
+                                break
+                            await asyncio.sleep(2)
+                            continue
+                        else:
+                            break  # Good IP, proceed
+                    except Exception:
+                        _cf_retries += 1
+                        try:
+                            await browser.close()
+                        except:
+                            pass
+                        browser = ctx = None
+                        if _cf_retries > _max_cf_retries:
+                            break
+                        continue
+
+                if not browser:
+                    await self.log("error", "scrape", "cf_all_blocked", {
+                        "message": f"  All {_max_cf_retries} proxy IPs blocked by Cloudflare — skipping Indeed scrape",
+                    }, platform="indeed")
+                    continue
 
                 new_for_query = 0
                 for page_num in range(1, max_pages + 1):
@@ -2830,8 +3040,41 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         url += f"&start={(page_num - 1) * 10}"
 
                     try:
-                        await self._page.goto(url, timeout=20000, wait_until="domcontentloaded")
-                        await asyncio.sleep(random.uniform(3, 6))
+                        if page_num > 1:  # Page 1 already loaded during CF retry loop
+                            await self._page.goto(url, timeout=45000, wait_until="domcontentloaded")
+                            await asyncio.sleep(random.uniform(5, 8))
+                        # Wait for Cloudflare / Turnstile challenge
+                        for _cf_wait in range(20):
+                            title = await self._page.title()
+                            body_text = (await self._page.inner_text("body")).lower()
+                            has_cf = (
+                                "just a moment" in title.lower()
+                                or "verifizierung" in body_text
+                                or "checking" in body_text
+                                or "verify you are human" in body_text
+                                or "bestätigen sie" in body_text
+                            )
+                            if not has_cf:
+                                break
+                            for sel in [
+                                'iframe[src*="challenges.cloudflare.com"]',
+                                '.cf-turnstile iframe',
+                                'iframe[title*="Cloudflare"]',
+                                'iframe[title*="Widget"]',
+                            ]:
+                                cf_el = await self._page.query_selector(sel)
+                                if cf_el:
+                                    try:
+                                        bbox = await cf_el.bounding_box()
+                                        if bbox:
+                                            await self._page.mouse.click(
+                                                bbox["x"] + 28,
+                                                bbox["y"] + bbox["height"] / 2,
+                                            )
+                                    except Exception:
+                                        pass
+                                    break
+                            await asyncio.sleep(3)
                         await self._dismiss_indeed_cookies()
 
                         if page_num == 1:
@@ -3016,32 +3259,39 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             await self.log("info", "apply", "no_jobs", {"message": "No unapplied Indeed jobs found"})
             return
 
-        # Launch browser + login
+        # Launch browser + login (retry with fresh IP if Cloudflare blocks)
         pw = await async_playwright().start()
-        browser = await pw.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled', '--disable-http2'])
-        ctx = await browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            locale="de-DE",
-        )
-        self._page = await ctx.new_page()
-        await self._page.add_init_script(STEALTH_JS)
 
         indeed_cred = next((c for c in creds if c.platform == "indeed" and c.is_active), None)
         if not indeed_cred:
             await self.log("error", "apply", "no_credentials", {
                 "message": "No Indeed credentials found — add them in Profile page.",
             }, platform="indeed")
-            await browser.close()
             await pw.stop()
             return
 
-        logged_in = await self._login_indeed(self._page, indeed_cred)
+        logged_in = False
+        browser = ctx = None
+        for _login_try in range(3):
+            browser, ctx, self._page = await self._launch_stealth_browser(pw, "indeed")
+            logged_in = await self._login_indeed(self._page, indeed_cred)
+            if logged_in:
+                break
+            await self.log("warn", "apply", "login_retry", {
+                "message": f"  Login failed — rotating IP (attempt {_login_try + 1}/3)",
+            }, platform="indeed")
+            try:
+                await browser.close()
+            except:
+                pass
+            browser = ctx = None
+            await asyncio.sleep(2)
         if not logged_in:
             await self.log("error", "apply", "login_required", {
-                "message": "INDEED LOGIN FAILED — Aborting apply phase.",
+                "message": "INDEED LOGIN FAILED after 3 IP rotations — Aborting apply phase.",
             }, platform="indeed")
-            await browser.close()
+            if browser:
+                await browser.close()
             await pw.stop()
             return
 
@@ -3064,8 +3314,33 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
             try:
                 t0 = time.time()
-                await self._page.goto(job.url, timeout=30000, wait_until="domcontentloaded")
-                await asyncio.sleep(random.uniform(2, 4))
+                await self._page.goto(job.url, timeout=45000, wait_until="domcontentloaded")
+                await asyncio.sleep(random.uniform(3, 5))
+
+                # Wait for Cloudflare / Turnstile on job page
+                for _cf_job in range(12):
+                    title = await self._page.title()
+                    body_snip = (await self._page.inner_text("body"))[:500].lower()
+                    if not any(kw in body_snip for kw in ["verifizierung", "checking", "verify", "bestätigen sie"]) \
+                       and "just a moment" not in title.lower():
+                        break
+                    for sel in [
+                        'iframe[src*="challenges.cloudflare.com"]',
+                        '.cf-turnstile iframe',
+                        'iframe[title*="Cloudflare"]',
+                        'iframe[title*="Widget"]',
+                    ]:
+                        cf_el = await self._page.query_selector(sel)
+                        if cf_el:
+                            try:
+                                bbox = await cf_el.bounding_box()
+                                if bbox:
+                                    await self._page.mouse.click(bbox["x"] + 28, bbox["y"] + bbox["height"] / 2)
+                            except Exception:
+                                pass
+                            break
+                    await asyncio.sleep(3)
+
                 await self._dismiss_indeed_cookies()
                 await self.screenshot("indeed_job_page")
 
@@ -3123,10 +3398,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await self.log("warn", "apply", "no_button", {
                         "message": f"  No Indeed apply button found. Buttons: {btn_texts[:8]}",
                     }, job_id=job.id, platform="indeed")
-                    application.status = "skipped"
+                    application.status = "external"
                     application.error_log = "No apply button found"
                     db.commit()
-                    self.stats["skipped"] += 1
+                    self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
                     continue
 
@@ -3161,10 +3436,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await self.log("warn", "apply", "external_redirect", {
                         "message": f"  External redirect to {target_url[:80]} — skipping",
                     }, job_id=job.id, platform="indeed")
-                    application.status = "skipped"
+                    application.status = "external"
                     application.error_log = f"External apply: {target_url[:200]}"
                     db.commit()
-                    self.stats["skipped"] += 1
+                    self.stats["external"] = self.stats.get("external", 0) + 1
                     await self.emit_progress()
                     if new_pages and not new_pages[0].is_closed():
                         await new_pages[0].close()
@@ -3248,8 +3523,70 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     )
                     self._page = original_page
 
-                    # Click continue/submit/next
+                    # Upload CV if file input present
+                    cv_path = profile.get("cv_path", "")
+                    if cv_path and os.path.exists(cv_path):
+                        try:
+                            file_inputs = await target_page.query_selector_all('input[type="file"]')
+                            for fi in file_inputs:
+                                await fi.set_input_files(cv_path)
+                                await self.log("info", "form", "cv_uploaded", {
+                                    "message": f"  Uploaded CV: {os.path.basename(cv_path)}",
+                                }, job_id=job.id, platform="indeed")
+                                await asyncio.sleep(1)
+                        except Exception as e:
+                            await self.log("debug", "form", "cv_upload_err", {
+                                "message": f"  CV upload error: {e}",
+                            }, job_id=job.id, platform="indeed")
+
+                    # Wait for Turnstile on form page (Indeed embeds it in apply forms)
+                    for _cf_form in range(10):
+                        try:
+                            cf_el = await target_page.query_selector('iframe[src*="challenges.cloudflare.com"], .cf-turnstile iframe, iframe[title*="Cloudflare"], iframe[title*="Widget"]')
+                            if not cf_el:
+                                break
+                            # Check if turnstile resolved (checkbox checked or widget hidden)
+                            bbox = await cf_el.bounding_box()
+                            if not bbox or bbox["height"] < 5:
+                                break  # Hidden/resolved
+                            # Try clicking the turnstile checkbox
+                            try:
+                                await target_page.mouse.click(bbox["x"] + 28, bbox["y"] + bbox["height"] / 2)
+                            except:
+                                pass
+                            await asyncio.sleep(3)
+                        except:
+                            break
+
+                    # Log page state for debugging
+                    try:
+                        _dbg_url = target_page.url
+                        _dbg_buttons = await target_page.evaluate("""() => {
+                            const btns = document.querySelectorAll('button, a[role="button"], input[type="submit"]');
+                            return Array.from(btns).filter(b => b.offsetParent !== null).map(b => b.innerText.trim()).filter(t => t.length > 0 && t.length < 60);
+                        }""")
+                        _dbg_inputs = await target_page.evaluate("""() => {
+                            const els = document.querySelectorAll('input:not([type=hidden]), select, textarea');
+                            return Array.from(els).filter(e => e.offsetParent !== null).map(e => {
+                                const label = e.labels?.[0]?.innerText || e.placeholder || e.name || e.type;
+                                return `${e.tagName.toLowerCase()}[${e.type||''}]: ${label}`;
+                            });
+                        }""")
+                        await self.log("info", "apply", "page_state", {
+                            "message": f"  Page: {_dbg_url[:80]} | Inputs: {_dbg_inputs[:5]} | Buttons: {_dbg_buttons[:8]}",
+                        }, job_id=job.id, platform="indeed")
+                    except:
+                        pass
+
+                    # Take screenshot at each form step
+                    orig_page = self._page
+                    self._page = target_page
+                    await self.screenshot(f"indeed_form_step_{step+1}")
+                    self._page = orig_page
+
+                    # Click continue/submit/next (skip Google/OAuth buttons)
                     clicked = False
+                    _skip_keywords = {"google", "facebook", "apple", "oauth", "mit google", "mit facebook", "mit apple"}
                     for sel in [
                         'button[data-testid="submit-button"]',
                         'button:has-text("Bewerbung abschicken")',
@@ -3262,11 +3599,15 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         'button:has-text("Next")',
                         'button[type="submit"]',
                         'a:has-text("Continue")',
+                        'a:has-text("Weiter")',
                     ]:
                         btn = await target_page.query_selector(sel)
                         if btn and await btn.is_visible():
                             try:
                                 step_text = (await btn.inner_text()).strip()
+                                # Skip OAuth / social login buttons
+                                if any(kw in step_text.lower() for kw in _skip_keywords):
+                                    continue
                                 await self.log("info", "apply", "form_step", {
                                     "message": f"  Step {step+1}: clicking \"{step_text}\"",
                                 }, job_id=job.id, platform="indeed")
@@ -3368,6 +3709,1176 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
         await browser.close()
         self._page = None
+
+    # ── LinkedIn helpers ──────────────────────────────────────────────
+
+    async def _launch_stealth_browser(self, pw, platform: str = "linkedin"):
+        """Launch browser with anti-detection + optional residential proxy."""
+        import re as _re
+        proxy_url = settings.PROXY_URL
+        launch_args = [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-http2',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-infobars',
+            '--disable-dev-shm-usage',
+        ]
+
+        launch_kwargs: dict = {"headless": True, "args": launch_args}
+        # Only use proxy for Indeed (LinkedIn doesn't need it)
+        if proxy_url and platform in ("indeed",):
+            # Auto-rotate: replace sessionid-XXX with a fresh random value for a new IP
+            new_sid = ''.join(random.choices("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=16))
+            proxy_url = _re.sub(r'sessionid-[^-]+', f'sessionid-{new_sid}', proxy_url)
+
+            # Parse http://user:pass@host:port into separate fields for Playwright
+            from urllib.parse import urlparse
+            parsed = urlparse(proxy_url)
+            proxy_cfg: dict = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+            if parsed.username:
+                proxy_cfg["username"] = parsed.username
+            if parsed.password:
+                proxy_cfg["password"] = parsed.password
+            launch_kwargs["proxy"] = proxy_cfg
+            await self.log("info", "system", "proxy", {
+                "message": f"Using residential proxy: {parsed.hostname}:{parsed.port} (session: {new_sid[:6]}...)",
+            }, platform=platform)
+
+        browser = await pw.chromium.launch(**launch_kwargs)
+
+        ua = random.choice(_UA_POOL)
+        ctx = await browser.new_context(
+            viewport={"width": random.choice([1366, 1440, 1920]), "height": random.choice([768, 900, 1080])},
+            user_agent=ua,
+            locale=random.choice(["de-DE", "de-AT", "en-US"]),
+            timezone_id=random.choice(["Europe/Berlin", "Europe/Vienna", "Europe/Zurich"]),
+            extra_http_headers={
+                "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+                "sec-ch-ua-platform": '"Windows"' if "Windows" in ua else '"macOS"' if "Macintosh" in ua else '"Linux"',
+            },
+        )
+        page = await ctx.new_page()
+        # Inject stealth JS before any navigation
+        await page.add_init_script(_STEALTH_SCRIPT_FULL)
+        return browser, ctx, page
+
+    async def _login_linkedin(self, page, cred) -> bool:
+        """Log into LinkedIn."""
+        await self.log("info", "apply", "login_start", {
+            "message": f"Logging into LinkedIn as {cred.email}...",
+        }, platform="linkedin")
+
+        for attempt in range(3):
+            try:
+                await page.goto("https://www.linkedin.com/login", timeout=30000, wait_until="domcontentloaded")
+                await asyncio.sleep(random.uniform(2, 4))
+
+                # Already logged in?
+                if any(x in page.url for x in ["/feed", "/jobs", "/mynetwork", "/messaging"]):
+                    await self.log("info", "apply", "already_logged_in", {"message": "  Already logged in!"}, platform="linkedin")
+                    return True
+
+                # Fill email
+                email_input = await page.query_selector("#username")
+                if email_input:
+                    await email_input.click()
+                    await asyncio.sleep(0.3)
+                    await email_input.fill("")
+                    await email_input.type(cred.email, delay=random.randint(40, 90))
+
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+
+                # Fill password
+                pass_input = await page.query_selector("#password")
+                if pass_input:
+                    await pass_input.click()
+                    await asyncio.sleep(0.3)
+                    await pass_input.fill("")
+                    await pass_input.type(cred.password_encrypted, delay=random.randint(40, 90))
+
+                await asyncio.sleep(random.uniform(0.5, 1))
+
+                # Submit
+                old_url = page.url
+                submit = await page.query_selector("button[type='submit']")
+                if submit:
+                    await submit.click()
+
+                # Wait for navigation
+                for _ in range(15):
+                    await asyncio.sleep(1)
+                    if page.url != old_url:
+                        break
+
+                await asyncio.sleep(2)
+                await self.screenshot("linkedin_after_login")
+
+                # Check login success
+                if any(x in page.url for x in ["/feed", "/jobs", "/mynetwork", "/messaging"]):
+                    await self.log("info", "apply", "login_success", {"message": "  Login successful!"}, platform="linkedin")
+                    return True
+
+                # Check for security challenge (email verification code)
+                if "checkpoint" in page.url or "challenge" in page.url:
+                    page_text = (await page.inner_text("body")).lower()
+                    # LinkedIn sends verification code to email
+                    if "code" in page_text or "verifizierung" in page_text or "sicherheitsprüfung" in page_text:
+                        await self.log("info", "apply", "security_code", {
+                            "message": "  LinkedIn requires email verification code — checking Gmail...",
+                        }, platform="linkedin")
+
+                        # Use LinkedIn-specific Gmail or fall back to default
+                        gmail_email = settings.GMAIL_EMAIL_LI or settings.GMAIL_EMAIL
+                        gmail_app_pw = settings.GMAIL_APP_PASSWORD_LI or settings.GMAIL_APP_PASSWORD
+                        if not gmail_email or not gmail_app_pw:
+                            await self.log("error", "apply", "no_gmail", {
+                                "message": "  Code verification requires GMAIL_EMAIL + GMAIL_APP_PASSWORD in .env",
+                            }, platform="linkedin")
+                            return False
+
+                        # Enter the code input field if visible, then fetch code
+                        code_input = await page.query_selector('input#input__email_verification_pin, input[name="pin"], input[type="text"]')
+                        if code_input:
+                            # Fetch code from Gmail (LinkedIn sends from "linkedin")
+                            code = self._fetch_indeed_code_from_gmail(gmail_email, gmail_app_pw, timeout_s=90, sender="linkedin")
+                            if code:
+                                await self.log("info", "apply", "got_code", {
+                                    "message": f"  Got LinkedIn verification code: {code}",
+                                }, platform="linkedin")
+                                await code_input.fill("")
+                                await code_input.type(code, delay=random.randint(30, 70))
+                                await asyncio.sleep(1)
+
+                                submit_btn = (
+                                    await page.query_selector('button[type="submit"]') or
+                                    await page.query_selector('button:has-text("Senden")') or
+                                    await page.query_selector('button:has-text("Submit")')
+                                )
+                                if submit_btn:
+                                    await submit_btn.click()
+                                    await asyncio.sleep(5)
+
+                                await self.screenshot("linkedin_after_code")
+
+                                # Check if we're logged in now
+                                if any(x in page.url for x in ["/feed", "/jobs", "/mynetwork", "/messaging"]):
+                                    await self.log("info", "apply", "login_success", {
+                                        "message": "  Login successful after code verification!",
+                                    }, platform="linkedin")
+                                    return True
+                            else:
+                                await self.log("error", "apply", "no_code", {
+                                    "message": "  Could not retrieve verification code from Gmail",
+                                }, platform="linkedin")
+                                return False
+
+                    await self.log("warn", "apply", "security_challenge", {
+                        "message": "  Security challenge not handled — cannot proceed",
+                        "url": page.url[:100],
+                    }, platform="linkedin")
+                    return False
+
+            except Exception as e:
+                await self.log("warn", "apply", "login_error", {
+                    "message": f"  Login attempt {attempt+1} failed: {str(e)[:100]}",
+                }, platform="linkedin")
+                await asyncio.sleep(3)
+
+        await self.log("error", "apply", "login_failed", {"message": "  All login attempts failed"}, platform="linkedin")
+        return False
+
+    async def _scrape_phase_linkedin(self, db: Session, job_filter: JobFilter, profile: dict) -> list[int]:
+        """Scrape LinkedIn for Easy Apply jobs."""
+        await self.log("info", "scrape", "phase_start", {"message": "Starting LinkedIn job discovery..."})
+        await self.emit_status("scraping")
+
+        queries = job_filter.job_titles if job_filter and job_filter.job_titles else ["kellner"]
+        locations = job_filter.locations if job_filter and job_filter.locations else ["deutschland"]
+        requested_apps = int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10
+        max_pages = max(3, min((requested_apps * 2) // 25 + 1, 10))
+        all_job_ids: list[int] = []
+        total_new = 0
+
+        pw = await async_playwright().start()
+        browser, ctx, page = await self._launch_stealth_browser(pw, "linkedin")
+        self._page = page
+        self._browser = browser
+
+        # Login first
+        li_cred = None
+        creds = db.query(PlatformCredential).filter(
+            PlatformCredential.user_id == self.user_id,
+            PlatformCredential.platform == "linkedin",
+        ).all()
+        if creds:
+            li_cred = creds[0]
+            logged_in = await self._login_linkedin(page, li_cred)
+            if not logged_in:
+                await self.log("error", "scrape", "login_required", {
+                    "message": "Cannot scrape LinkedIn without login"
+                }, platform="linkedin")
+                await browser.close()
+                return []
+        else:
+            await self.log("warn", "scrape", "no_credentials", {
+                "message": "No LinkedIn credentials — scraping public listings only"
+            }, platform="linkedin")
+
+        for query in queries:
+            for loc in locations:
+                if not self.running:
+                    break
+
+                await self.log("info", "scrape", "search_start", {
+                    "message": f"Searching LinkedIn: {query} in {loc} (up to {max_pages} pages)",
+                    "query": query, "location": loc,
+                }, platform="linkedin")
+
+                for page_num in range(max_pages):
+                    if not self.running:
+                        break
+
+                    params = urllib.parse.urlencode({
+                        "keywords": query,
+                        "location": loc,
+                        "f_AL": "true",  # Easy Apply filter
+                        "sortBy": "DD",  # Date posted
+                        "start": page_num * 25,
+                    })
+                    url = f"https://www.linkedin.com/jobs/search/?{params}"
+
+                    try:
+                        await page.goto(url, timeout=25000, wait_until="domcontentloaded")
+                        await asyncio.sleep(random.uniform(3, 6))
+
+                        # Check for login wall / rate limit
+                        if "authwall" in page.url or "login" in page.url:
+                            await self.log("warn", "scrape", "auth_wall", {
+                                "message": "  Hit auth wall — stopping scrape"
+                            }, platform="linkedin")
+                            break
+
+                        await self.screenshot("linkedin_search")
+
+                        # Extract job cards
+                        card_selectors = [
+                            ".scaffold-layout__list-item",
+                            ".jobs-search-results__list-item",
+                            "[data-job-id]",
+                            ".job-card-container",
+                        ]
+                        cards = []
+                        for sel in card_selectors:
+                            cards = await page.query_selector_all(sel)
+                            if cards:
+                                break
+
+                        if not cards:
+                            await self.log("info", "scrape", "no_more", {
+                                "message": f"  No jobs on page {page_num + 1}"
+                            }, platform="linkedin")
+                            break
+
+                        await self.log("info", "scrape", "cards_found", {
+                            "message": f"  Page {page_num + 1}: {len(cards)} job cards",
+                        }, platform="linkedin")
+
+                        # Fast extract: pull all job data from cards without clicking each one
+                        new_on_page = 0
+                        _skipped_no_title = 0
+                        _skipped_no_url = 0
+                        _skipped_dedup = 0
+                        _errors = 0
+
+                        card_data = await page.evaluate("""() => {
+                            const cards = document.querySelectorAll('.scaffold-layout__list-item, .jobs-search-results__list-item, [data-job-id], .job-card-container');
+                            return Array.from(cards).slice(0, 25).map(card => {
+                                const titleEl = card.querySelector('a.job-card-list__title, .job-card-list__title, a[class*="job-card-list__title"], strong, a.job-card-container__link');
+                                const companyEl = card.querySelector('.job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__primary-description');
+                                const linkEl = card.querySelector('a[href*="/jobs/view/"], a.job-card-list__title, a.job-card-container__link');
+                                const href = linkEl ? linkEl.href : '';
+                                const jobIdMatch = href.match(/\\/jobs\\/view\\/(\\d+)/);
+                                return {
+                                    title: titleEl ? titleEl.innerText.trim() : '',
+                                    company: companyEl ? companyEl.innerText.trim() : '',
+                                    jobId: jobIdMatch ? jobIdMatch[1] : '',
+                                    href: href,
+                                };
+                            }).filter(c => c.title && c.jobId);
+                        }""")
+
+                        for ci, cd in enumerate(card_data):
+                            try:
+                                title = cd["title"]
+                                company = cd.get("company", "")
+                                job_ext_id = cd["jobId"]
+                                job_url = f"https://www.linkedin.com/jobs/view/{job_ext_id}/"
+
+                                # LinkedIn already filters by keyword — skip strict relevance check
+                                # (Unlike StepStone/Indeed, LinkedIn search is accurate enough)
+
+                                # f_AL=true already filters to Easy Apply only — no extra check needed
+
+                                # Dedup
+                                existing = db.query(Job).filter(Job.url == job_url).first()
+                                if existing:
+                                    all_job_ids.append(existing.id)
+                                    _skipped_dedup += 1
+                                    continue
+
+                                job = Job(
+                                    platform="linkedin",
+                                    title=title,
+                                    company=company or "Unknown",
+                                    url=job_url,
+                                    location=loc,
+                                    scraped_at=datetime.now(timezone.utc),
+                                )
+                                db.add(job)
+                                db.flush()
+                                all_job_ids.append(job.id)
+                                new_on_page += 1
+
+                            except Exception as e:
+                                _errors += 1
+                                if _errors <= 3:  # Log first 3 errors
+                                    await self.log("warn", "scrape", "card_error", {
+                                        "message": f"    Card {ci+1} error: {str(e)[:150]}",
+                                    }, platform="linkedin")
+                                continue
+
+                        db.commit()
+                        total_new += new_on_page
+                        await self.log("info", "scrape", "page_summary", {
+                            "message": f"  Page {page_num + 1} breakdown: {new_on_page} new, {_skipped_dedup} dedup, {_skipped_no_title} no-title, {_errors} errors",
+                        }, platform="linkedin")
+
+                        await self.log("info", "scrape", "page_done", {
+                            "message": f"  Page {page_num + 1}: {new_on_page} new Easy Apply jobs stored",
+                        }, platform="linkedin")
+
+                        # Random delay between pages
+                        await asyncio.sleep(random.uniform(3, 7))
+
+                    except Exception as e:
+                        err_msg = str(e)[:100]
+                        await self.log("warn", "scrape", "page_error", {
+                            "message": f"  Error on page {page_num + 1}: {err_msg}",
+                        }, platform="linkedin")
+                        # If browser/page closed, stop scraping
+                        if "closed" in err_msg.lower() or "crashed" in err_msg.lower():
+                            break
+
+        await self.log("info", "scrape", "phase_done", {
+            "message": f"LinkedIn scrape complete: {total_new} new jobs stored, {len(all_job_ids)} total",
+            "new_jobs": total_new, "total": len(all_job_ids),
+        }, platform="linkedin")
+        await self.emit_progress()
+
+        # Don't close browser — reuse for apply phase
+        return all_job_ids
+
+    async def _apply_phase_linkedin(self, db: Session, profile: dict, creds: list, job_filter: JobFilter, scraped_job_ids: list[int] = None):
+        """Apply to LinkedIn jobs using Easy Apply."""
+        await self.log("info", "apply", "phase_start", {"message": "Starting LinkedIn Easy Apply phase..."})
+        await self.emit_status("applying")
+
+        applied_urls = set(
+            r[0] for r in db.query(Application.url).filter(Application.user_id == self.user_id).all() if r[0]
+        )
+
+        if scraped_job_ids:
+            query = db.query(Job).filter(Job.id.in_(scraped_job_ids))
+        else:
+            query = db.query(Job).filter(Job.platform == "linkedin")
+
+        if applied_urls:
+            query = query.filter(~Job.url.in_(applied_urls))
+
+        max_apps = min(max(int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10, 1), 500)
+        jobs = query.order_by(Job.scraped_at.desc()).limit(max_apps).all()
+
+        self.stats["total"] = len(jobs)
+        await self.log("info", "apply", "jobs_count", {
+            "message": f"Found {len(jobs)} LinkedIn Easy Apply jobs for application",
+            "count": len(jobs),
+        }, platform="linkedin")
+
+        if not jobs:
+            return
+
+        # Browser setup (reuse from scrape or create new)
+        pw = None
+        browser = self._browser
+        page = self._page
+        if not browser or not page:
+            pw = await async_playwright().start()
+            browser, ctx, page = await self._launch_stealth_browser(pw, "linkedin")
+            self._page = page
+            self._browser = browser
+
+        # Login
+        li_cred = None
+        li_creds = db.query(PlatformCredential).filter(
+            PlatformCredential.user_id == self.user_id,
+            PlatformCredential.platform == "linkedin",
+        ).all()
+        if li_creds:
+            li_cred = li_creds[0]
+        else:
+            await self.log("error", "apply", "no_credentials", {
+                "message": "No LinkedIn credentials configured — cannot apply"
+            }, platform="linkedin")
+            return
+
+        # Check if still logged in, if not re-login
+        try:
+            if not any(x in page.url for x in ["/feed", "/jobs", "/mynetwork"]):
+                logged_in = await self._login_linkedin(page, li_cred)
+                if not logged_in:
+                    await self.log("error", "apply", "login_failed", {
+                        "message": "Cannot apply — login failed"
+                    }, platform="linkedin")
+                    return
+        except:
+            logged_in = await self._login_linkedin(page, li_cred)
+            if not logged_in:
+                return
+
+        cv_path = profile.get("cv_path")
+
+        for i, job in enumerate(jobs):
+            if not self.running:
+                break
+
+            t0 = time.time()
+            application = Application(
+                user_id=self.user_id,
+                job_id=job.id,
+                url=job.url,
+                job_title=job.title,
+                company=job.company,
+                platform="linkedin",
+                status="pending",
+                applied_at=datetime.now(timezone.utc),
+            )
+            db.add(application)
+            db.flush()
+
+            await self.log("info", "apply", "start", {
+                "message": f"[{i+1}/{len(jobs)}] Applying: {job.title} at {job.company or 'Unknown'}",
+            }, job_id=job.id, platform="linkedin")
+
+            try:
+                await page.goto(job.url, timeout=25000, wait_until="domcontentloaded")
+                # Wait for job content to render (LinkedIn is SPA — content loads via JS)
+                # Use JS wait instead of CSS selectors (LinkedIn changes class names frequently)
+                try:
+                    await page.wait_for_function("""() => {
+                        const buttons = document.querySelectorAll('button, a[role="button"]');
+                        for (const b of buttons) {
+                            const txt = (b.innerText || '').toLowerCase();
+                            if (txt.includes('easy apply') || txt.includes('einfach bewerben')) return true;
+                        }
+                        // Also check if any job title element rendered
+                        if (document.querySelector('h1, h2.t-24, .t-24')) return true;
+                        return false;
+                    }""", timeout=15000)
+                except:
+                    pass
+                await asyncio.sleep(random.uniform(1.5, 2.5))
+
+                # Check for auth wall
+                if "authwall" in page.url or "login" in page.url:
+                    logged_in = await self._login_linkedin(page, li_cred)
+                    if logged_in:
+                        await page.goto(job.url, timeout=25000, wait_until="domcontentloaded")
+                        await asyncio.sleep(2)
+                    else:
+                        application.status = "failed"
+                        application.error_log = "Login required"
+                        db.commit()
+                        self.stats["failed"] += 1
+                        await self.emit_progress()
+                        continue
+
+                # Check if already applied
+                page_text = await page.inner_text("body")
+                page_text_lower = page_text.lower()
+                if any(x in page_text_lower for x in ["applied", "beworben", "submitted"]):
+                    btn_area = ""
+                    for sel in [".jobs-apply-button", ".jobs-unified-top-card"]:
+                        el = await page.query_selector(sel)
+                        if el:
+                            btn_area = (await el.inner_text()).lower()
+                            break
+                    if any(x in btn_area for x in ["applied", "beworben"]):
+                        application.status = "skipped"
+                        application.error_log = "Already applied"
+                        db.commit()
+                        self.stats["skipped"] += 1
+                        await self.emit_progress()
+                        continue
+
+                # Find Easy Apply button using Playwright locators (robust against class changes)
+                apply_btn = None
+                # Method 1: Playwright text locator (matches any element type)
+                for txt_pattern in ["Easy Apply", "Einfach bewerben"]:
+                    loc = page.get_by_text(txt_pattern, exact=False)
+                    if await loc.count() > 0:
+                        # Find the clickable parent (button/link)
+                        first_el = loc.first
+                        try:
+                            tag = await first_el.evaluate("el => el.tagName.toLowerCase()")
+                            if tag in ("button", "a"):
+                                apply_btn = first_el
+                            else:
+                                # Text is inside a span/svg — walk up to find clickable parent
+                                parent_btn = page.locator(f"button:has-text('{txt_pattern}'), a:has-text('{txt_pattern}')")
+                                if await parent_btn.count() > 0:
+                                    apply_btn = parent_btn.first
+                                else:
+                                    apply_btn = first_el  # Click the element itself
+                            break
+                        except:
+                            pass
+
+                # Method 2: aria-label fallback
+                if not apply_btn:
+                    for aria_text in ["Easy Apply", "Einfach bewerben"]:
+                        loc = page.locator(f'[aria-label*="{aria_text}"]')
+                        if await loc.count() > 0:
+                            apply_btn = loc.first
+                            break
+
+                if not apply_btn:
+                    # Deep diagnostic: find ANY element containing "easy apply" text
+                    try:
+                        diag = await page.evaluate("""() => {
+                            const all = document.querySelectorAll('*');
+                            const matches = [];
+                            for (const el of all) {
+                                const txt = (el.innerText || '').trim().toLowerCase();
+                                if (txt.includes('easy apply') || txt.includes('einfach bewerben')) {
+                                    matches.push({
+                                        tag: el.tagName,
+                                        cls: el.className?.toString?.()?.slice(0, 80) || '',
+                                        role: el.getAttribute('role') || '',
+                                        vis: el.offsetParent !== null,
+                                        rect: el.getBoundingClientRect ? {
+                                            x: Math.round(el.getBoundingClientRect().x),
+                                            y: Math.round(el.getBoundingClientRect().y),
+                                            w: Math.round(el.getBoundingClientRect().width),
+                                            h: Math.round(el.getBoundingClientRect().height)
+                                        } : null,
+                                        txt: (el.innerText || '').trim().slice(0, 50)
+                                    });
+                                    if (matches.length >= 5) break;
+                                }
+                            }
+                            return matches;
+                        }""")
+                        await self.log("info", "apply", "no_easy_apply", {
+                            "message": f"  No Easy Apply locator — DOM matches: {diag}",
+                        }, job_id=job.id, platform="linkedin")
+                    except Exception as diag_err:
+                        await self.log("info", "apply", "no_easy_apply", {
+                            "message": f"  No Easy Apply — diag error: {diag_err}",
+                        }, job_id=job.id, platform="linkedin")
+                    await self.screenshot("linkedin_no_easy_apply")
+                    application.status = "external"
+                    application.error_log = "No Easy Apply button"
+                    db.commit()
+                    self.stats["external"] = self.stats.get("external", 0) + 1
+                    await self.emit_progress()
+                    continue
+
+                # Click Easy Apply
+                await apply_btn.scroll_into_view_if_needed()
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+                await apply_btn.click(force=True)
+                await asyncio.sleep(random.uniform(1, 2))
+
+                # Check if external redirect
+                if "linkedin.com" not in page.url.lower():
+                    application.status = "external"
+                    application.error_log = f"External redirect: {page.url[:100]}"
+                    db.commit()
+                    self.stats["external"] = self.stats.get("external", 0) + 1
+                    await self.emit_progress()
+                    continue
+
+                await self.screenshot("linkedin_modal")
+
+                # Check modal opened
+                modal = None
+                for sel in [".jobs-easy-apply-modal", ".artdeco-modal", "[role='dialog']"]:
+                    modal = await page.query_selector(sel)
+                    if modal and await modal.is_visible():
+                        break
+                    modal = None
+
+                if not modal:
+                    application.status = "failed"
+                    application.error_log = "Easy Apply modal didn't open"
+                    db.commit()
+                    self.stats["failed"] += 1
+                    await self.emit_progress()
+                    continue
+
+                # Complete multi-step form
+                success = await self._complete_linkedin_form(page, profile, cv_path, job)
+                apply_duration = time.time() - t0
+
+                if success:
+                    application.status = "success"
+                    self.stats["applied"] += 1
+                    await self.log("info", "apply", "success", {
+                        "message": f"  SUCCESS — LinkedIn Easy Apply submitted in {apply_duration:.0f}s",
+                        "duration_s": apply_duration,
+                    }, job_id=job.id, platform="linkedin")
+                else:
+                    application.status = "failed"
+                    application.error_log = "Could not complete Easy Apply form"
+                    self.stats["failed"] += 1
+                    await self.log("warn", "apply", "form_failed", {
+                        "message": f"  FAILED — Could not complete form ({apply_duration:.0f}s)",
+                    }, job_id=job.id, platform="linkedin")
+
+                # Dismiss any modal left open
+                await self._dismiss_linkedin_modal(page)
+
+            except Exception as e:
+                application.status = "failed"
+                application.error_log = str(e)[:500]
+                self.stats["failed"] += 1
+                await self.log("error", "apply", "error", {
+                    "message": f"  ERROR: {str(e)[:100]}",
+                }, job_id=job.id, platform="linkedin")
+                await self._dismiss_linkedin_modal(page)
+
+            db.commit()
+            await self.emit_progress()
+
+            if i < len(jobs) - 1 and self.running:
+                delay = random.uniform(25, 45)
+                await self.log("info", "system", "delay", {
+                    "message": f"  Waiting {delay:.0f}s before next...",
+                })
+                await asyncio.sleep(delay)
+
+        await browser.close()
+        self._page = None
+        self._browser = None
+
+    async def _complete_linkedin_form(self, page, profile: dict, cv_path: str | None, job) -> bool:
+        """Complete LinkedIn Easy Apply multi-step form. Returns True on success."""
+        form_start = time.time()
+        TIMEOUT = 60  # seconds
+        step = 0
+        just_clicked_submit = False
+
+        questions_json = profile.get("questions_json", {})
+
+        prev_step_url = ""
+        stuck_count = 0
+        submitted_once = False
+
+        while step < 30:
+            step += 1
+
+            # Timeout
+            if time.time() - form_start > TIMEOUT:
+                await self.screenshot("linkedin_form_timeout")
+                await self.log("warn", "form", "timeout", {
+                    "message": f"  Form timeout after {TIMEOUT}s at step {step}",
+                }, platform="linkedin")
+                return False
+
+            # Check if modal is still open
+            modal_visible = False
+            for sel in [".jobs-easy-apply-modal", ".artdeco-modal", "[role='dialog']"]:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    modal_visible = True
+                    break
+
+            if not modal_visible:
+                await asyncio.sleep(1)
+                if just_clicked_submit or submitted_once:
+                    error_el = await page.query_selector(".artdeco-inline-feedback--error")
+                    if error_el and await error_el.is_visible():
+                        return False
+                    await self.log("info", "form", "modal_closed_success", {
+                        "message": "  Modal closed after submit — application sent",
+                    }, platform="linkedin")
+                    return True
+                try:
+                    body = (await page.inner_text("body")).lower()
+                    if any(kw in body for kw in ["application sent", "bewerbung gesendet", "successfully submitted"]):
+                        return True
+                except:
+                    pass
+                return False
+
+            just_clicked_submit = False
+
+            # Get modal content for step identification
+            try:
+                modal_text = ""
+                for sel in [".jobs-easy-apply-modal", ".artdeco-modal", "[role='dialog']"]:
+                    el = await page.query_selector(sel)
+                    if el:
+                        modal_text = (await el.inner_text()).lower()
+                        break
+                if any(kw in modal_text for kw in [
+                    "application sent", "bewerbung gesendet", "submitted",
+                    "application was sent", "bewerbung wurde gesendet",
+                    "thank you", "danke", "your application", "done",
+                ]):
+                    await self.log("info", "form", "success_text", {
+                        "message": "  Success text detected in modal",
+                    }, platform="linkedin")
+                    return True
+            except:
+                modal_text = ""
+
+            # Detect if stuck (same content for 3+ iterations)
+            step_sig = modal_text[:200]
+            if step_sig == prev_step_url:
+                stuck_count += 1
+                if stuck_count >= 4:
+                    await self.screenshot("linkedin_form_stuck")
+                    # Log what's visible in the modal
+                    try:
+                        form_diag = await page.evaluate("""() => {
+                            const modal = document.querySelector('[role="dialog"]') || document.querySelector('.artdeco-modal');
+                            if (!modal) return {error: 'no modal'};
+                            const inputs = modal.querySelectorAll('input:not([type="hidden"]), textarea, select');
+                            const fields = Array.from(inputs).map(el => ({
+                                tag: el.tagName, type: el.type || '', name: el.name || '',
+                                label: (el.getAttribute('aria-label') || el.placeholder || '').slice(0, 50),
+                                value: (el.value || '').slice(0, 30),
+                                visible: el.offsetParent !== null
+                            }));
+                            const btns = Array.from(modal.querySelectorAll('button')).map(b => ({
+                                text: b.innerText.trim().slice(0, 40),
+                                enabled: !b.disabled, visible: b.offsetParent !== null
+                            }));
+                            const errors = Array.from(modal.querySelectorAll('[class*="error"], [class*="feedback"]'))
+                                .map(e => e.innerText.trim().slice(0, 80)).filter(t => t);
+                            return {fields, btns, errors};
+                        }""")
+                        await self.log("warn", "form", "stuck", {
+                            "message": f"  STUCK at step {step}: {form_diag}",
+                        }, platform="linkedin")
+                    except Exception as diag_err:
+                        await self.log("warn", "form", "stuck", {
+                            "message": f"  STUCK at step {step}, diag error: {diag_err}",
+                        }, platform="linkedin")
+                    return False
+            else:
+                stuck_count = 0
+                prev_step_url = step_sig
+
+            # Check for validation errors
+            has_errors = False
+            error_texts = []
+            for sel in [".artdeco-inline-feedback--error", "[data-test-form-element-error]"]:
+                els = await page.query_selector_all(sel)
+                for el in els:
+                    try:
+                        if await el.is_visible():
+                            has_errors = True
+                            txt = (await el.inner_text()).strip()
+                            if txt:
+                                error_texts.append(txt[:60])
+                    except:
+                        pass
+
+            if error_texts:
+                await self.log("info", "form", "errors_visible", {
+                    "message": f"  Form errors: {error_texts}",
+                }, platform="linkedin")
+
+            # Fill fields FIRST, then click buttons
+            filled = await self._fill_linkedin_fields(page, profile, questions_json, cv_path)
+            if filled > 0:
+                await self.log("info", "form", "fields_filled", {
+                    "message": f"  Step {step}: filled {filled} fields",
+                }, platform="linkedin")
+                await asyncio.sleep(0.5)
+
+            # Try Submit
+            for sel in [
+                "button[aria-label='Submit application']",
+                "button:has-text('Submit application')",
+                "button:has-text('Bewerbung absenden')",
+                "button:has-text('Bewerbung senden')",
+            ]:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await btn.click(force=True)
+                    just_clicked_submit = True
+                    submitted_once = True
+                    await self.log("info", "form", "submit_clicked", {
+                        "message": "  Clicked Submit",
+                    }, platform="linkedin")
+                    await asyncio.sleep(random.uniform(1, 2))
+                    break
+
+            if just_clicked_submit:
+                continue
+
+            # Try Next / Review
+            clicked_next = False
+            for sel in [
+                "button[aria-label='Continue to next step']",
+                "button[aria-label='Review your application']",
+                "button:has-text('Next')", "button:has-text('Weiter')",
+                "button:has-text('Review')", "button:has-text('Überprüfen')",
+                ".artdeco-modal footer button.artdeco-button--primary",
+            ]:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    try:
+                        if await btn.is_enabled():
+                            btn_text = (await btn.inner_text()).strip()
+                            await btn.click(force=True)
+                            clicked_next = True
+                            await self.log("info", "form", "next_clicked", {
+                                "message": f"  Clicked {btn_text}",
+                            }, platform="linkedin")
+                            await asyncio.sleep(random.uniform(0.8, 1.5))
+                            break
+                    except:
+                        continue
+
+            if not clicked_next and not has_errors and not just_clicked_submit:
+                # No button found and nothing was submitted — check if post-submit confirmation
+                # If modal has no form inputs and no action buttons, likely a success screen
+                try:
+                    has_form_content = await page.evaluate("""() => {
+                        const modal = document.querySelector('[role="dialog"]') || document.querySelector('.artdeco-modal');
+                        if (!modal) return false;
+                        const inputs = modal.querySelectorAll('input:not([type="hidden"]), textarea, select');
+                        const actionBtns = modal.querySelectorAll('button');
+                        const actionTexts = Array.from(actionBtns).map(b => b.innerText.trim().toLowerCase());
+                        const hasFormBtns = actionTexts.some(t =>
+                            t.includes('next') || t.includes('weiter') || t.includes('submit') ||
+                            t.includes('review') || t.includes('absenden') || t.includes('senden'));
+                        return inputs.length > 0 || hasFormBtns;
+                    }""")
+                    if not has_form_content:
+                        await self.log("info", "form", "post_submit_success", {
+                            "message": "  No form content remaining — treating as success",
+                        }, platform="linkedin")
+                        return True
+                except:
+                    pass
+
+                await self.log("info", "form", "no_button", {
+                    "message": f"  Step {step}: no clickable button found, waiting...",
+                }, platform="linkedin")
+
+            await asyncio.sleep(random.uniform(0.5, 1.0))
+
+        return False
+
+    async def _fill_linkedin_fields(self, page, profile: dict, questions_json: dict, cv_path: str | None) -> int:
+        """Fill visible form fields in LinkedIn Easy Apply modal."""
+        filled = 0
+
+        # Text inputs
+        try:
+            inputs = await page.query_selector_all("input[type='text']:visible:not([readonly]), input[type='number']:visible:not([readonly])")
+            for inp in inputs:
+                try:
+                    current = await inp.input_value()
+                    if current and current.strip():
+                        continue  # Already filled
+
+                    label = await self._get_linkedin_field_label(page, inp)
+                    if not label:
+                        continue
+                    label_lower = label.lower()
+
+                    answer = self._get_linkedin_answer(label_lower, profile, questions_json)
+                    if answer:
+                        await inp.click()
+                        await asyncio.sleep(0.2)
+                        await inp.fill("")
+                        await inp.type(str(answer), delay=random.randint(30, 70))
+                        filled += 1
+                except:
+                    continue
+        except:
+            pass
+
+        # Textareas
+        try:
+            textareas = await page.query_selector_all("textarea:visible")
+            for ta in textareas:
+                try:
+                    current = await ta.input_value()
+                    if current and current.strip():
+                        continue
+                    label = await self._get_linkedin_field_label(page, ta)
+                    label_lower = (label or "").lower()
+                    answer = self._get_linkedin_answer(label_lower, profile, questions_json, field_type="textarea")
+                    if answer:
+                        await ta.click()
+                        await asyncio.sleep(0.2)
+                        await ta.fill(str(answer))
+                        filled += 1
+                except:
+                    continue
+        except:
+            pass
+
+        # Native selects
+        try:
+            selects = await page.query_selector_all("select:visible")
+            for sel in selects:
+                try:
+                    current = await sel.input_value()
+                    if current and current not in ["", "-1"]:
+                        continue
+                    options = await sel.query_selector_all("option")
+                    # Prefer "Yes" / "Ja"
+                    picked = False
+                    for opt in options:
+                        text = (await opt.inner_text()).strip().lower()
+                        if text in ["yes", "ja"]:
+                            val = await opt.get_attribute("value")
+                            if val:
+                                await sel.select_option(value=val)
+                                filled += 1
+                                picked = True
+                                break
+                    if not picked:
+                        # Pick first non-empty option
+                        for opt in options:
+                            text = (await opt.inner_text()).strip()
+                            val = await opt.get_attribute("value") or ""
+                            if text and val not in ["", "-1"] and "select" not in text.lower():
+                                await sel.select_option(value=val)
+                                filled += 1
+                                break
+                except:
+                    continue
+        except:
+            pass
+
+        # Custom dropdowns (LinkedIn style)
+        try:
+            triggers = await page.query_selector_all(
+                "button:has-text('Select an option'):visible, "
+                "div[role='button']:has-text('Select an option'):visible, "
+                "button:has-text('Option auswählen'):visible, "
+                "div[role='button']:has-text('Option auswählen'):visible"
+            )
+            for trigger in triggers:
+                try:
+                    await trigger.click(force=True)
+                    await asyncio.sleep(0.3)
+                    options = await page.query_selector_all("[role='option'], .artdeco-dropdown__item")
+                    picked = False
+                    for opt in options:
+                        text = (await opt.inner_text()).strip().lower()
+                        if text in ["yes", "ja"]:
+                            await opt.click()
+                            filled += 1
+                            picked = True
+                            break
+                    if not picked:
+                        for opt in options:
+                            text = (await opt.inner_text()).strip()
+                            if text and "select" not in text.lower():
+                                await opt.click()
+                                filled += 1
+                                break
+                    await asyncio.sleep(0.2)
+                except:
+                    continue
+        except:
+            pass
+
+        # Radio buttons — prefer Yes
+        try:
+            fieldsets = await page.query_selector_all("fieldset:visible")
+            for fs in fieldsets:
+                try:
+                    radios = await fs.query_selector_all("input[type='radio']")
+                    any_checked = False
+                    for r in radios:
+                        if await r.is_checked():
+                            any_checked = True
+                            break
+                    if any_checked:
+                        continue
+                    # Pick "Yes" / first option
+                    for r in radios:
+                        label_el = await r.evaluate_handle("el => el.closest('label') || el.parentElement")
+                        label_text = (await label_el.inner_text()).strip().lower() if label_el else ""
+                        if label_text in ["yes", "ja"]:
+                            await r.click(force=True)
+                            filled += 1
+                            break
+                    else:
+                        # Default to first radio
+                        if radios:
+                            await radios[0].click(force=True)
+                            filled += 1
+                except:
+                    continue
+        except:
+            pass
+
+        # File upload (CV)
+        if cv_path and os.path.exists(cv_path):
+            try:
+                file_inputs = await page.query_selector_all("input[type='file']")
+                for fi in file_inputs:
+                    try:
+                        # Check if resume already uploaded
+                        resume_present = False
+                        for sel in [".jobs-document-upload-redesign-card__file-name", "[class*='jobs-resume']"]:
+                            el = await page.query_selector(sel)
+                            if el and await el.is_visible():
+                                resume_present = True
+                                break
+                        if resume_present:
+                            continue
+                        await fi.set_input_files(cv_path)
+                        filled += 1
+                        await self.log("info", "form", "cv_uploaded", {
+                            "message": f"  Uploaded CV: {os.path.basename(cv_path)}",
+                        }, platform="linkedin")
+                        await asyncio.sleep(1)
+                    except:
+                        continue
+            except:
+                pass
+
+        # Checkboxes — check unchecked ones
+        try:
+            checkboxes = await page.query_selector_all("input[type='checkbox']:visible")
+            for cb in checkboxes:
+                try:
+                    if not await cb.is_checked():
+                        await cb.click(force=True)
+                        filled += 1
+                except:
+                    continue
+        except:
+            pass
+
+        return filled
+
+    async def _get_linkedin_field_label(self, page, element) -> str:
+        """Get label text for a LinkedIn form element."""
+        try:
+            el_id = await element.get_attribute("id")
+            if el_id:
+                label = await page.query_selector(f"label[for='{el_id}']")
+                if label and await label.is_visible():
+                    return (await label.inner_text()).strip()
+            aria = await element.get_attribute("aria-label")
+            if aria:
+                return aria
+            placeholder = await element.get_attribute("placeholder")
+            if placeholder:
+                return placeholder
+            # Try parent container label
+            try:
+                container_label = await element.evaluate("""el => {
+                    const container = el.closest('.jobs-easy-apply-form-section__grouping, .fb-dash-form-element');
+                    if (container) {
+                        const lbl = container.querySelector('label, .fb-dash-form-element__label');
+                        return lbl ? lbl.innerText.trim() : '';
+                    }
+                    return '';
+                }""")
+                if container_label:
+                    return container_label
+            except:
+                pass
+        except:
+            pass
+        return ""
+
+    def _get_linkedin_answer(self, label_lower: str, profile: dict, questions_json: dict, field_type: str = "text") -> str | None:
+        """Get answer for a LinkedIn form field using Q&A vault + patterns + profile."""
+        if not label_lower:
+            return None
+
+        # 1. Profile fields
+        profile_map = {
+            "first name": profile.get("first_name", ""),
+            "vorname": profile.get("first_name", ""),
+            "last name": profile.get("last_name", ""),
+            "nachname": profile.get("last_name", ""),
+            "phone": profile.get("phone", ""),
+            "telefon": profile.get("phone", ""),
+            "mobil": profile.get("phone", ""),
+            "city": profile.get("city", ""),
+            "stadt": profile.get("city", ""),
+            "zip": profile.get("zip_code", ""),
+            "plz": profile.get("zip_code", ""),
+            "street": profile.get("street_address", ""),
+            "straße": profile.get("street_address", ""),
+            "email": profile.get("email", ""),
+            "e-mail": profile.get("email", ""),
+        }
+        for key, val in profile_map.items():
+            if key in label_lower and val:
+                return val
+
+        # 2. Salary / Experience (numbers)
+        if any(kw in label_lower for kw in ["salary", "gehalt", "gehaltsvorstellung", "gehaltserwartung"]):
+            return str(profile.get("salary_expectation", 40000))
+        if any(kw in label_lower for kw in ["years", "jahre", "experience", "erfahrung", "berufserfahrung"]):
+            return str(profile.get("years_experience", 5))
+
+        # 3. Q&A vault (fuzzy match)
+        for q, a in questions_json.items():
+            if q.lower() in label_lower or label_lower in q.lower():
+                return str(a)
+            if fuzz.partial_ratio(q.lower(), label_lower) > 80:
+                return str(a)
+
+        # 4. LinkedIn pattern answers
+        for pattern, answer in _LINKEDIN_QA.items():
+            if re.search(pattern, label_lower):
+                return answer
+
+        # 5. Default for textarea
+        if field_type == "textarea":
+            return "I am very interested in this position and believe my experience is a great fit."
+
+        return None
+
+    async def _dismiss_linkedin_modal(self, page):
+        """Close any open LinkedIn Easy Apply modal."""
+        try:
+            # Try Dismiss button first
+            for sel in ["button[aria-label='Dismiss']", "button:has-text('Discard')", "button:has-text('Done')", "button:has-text('Fertig')"]:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(0.5)
+                    break
+            # Confirm discard if prompted
+            for sel in ["button:has-text('Discard')", "button:has-text('Verwerfen')"]:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(0.3)
+                    break
+        except:
+            pass
 
     async def stop(self):
         """Gracefully stop the bot."""

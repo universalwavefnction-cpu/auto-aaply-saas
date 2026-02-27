@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun *)",
+      "Bash(bunx *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(uvicorn *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git stash *)",
+      "Bash(gh *)",
+      "Bash(curl *)",
+      "Bash(scp *)",
+      "Bash(ssh *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(which *)",
+      "Bash(kill *)",
+      "Bash(lsof *)",
+      "Bash(playwright install *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(sudo rm *)",
+      "Bash(git push --force *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "bash -c 'cd /Users/universal.wavefunction/autoapply-web && for f in $(git diff --name-only --diff-filter=M 2>/dev/null); do case \"$f\" in *.py) ruff format \"$f\" 2>/dev/null; ruff check --fix \"$f\" 2>/dev/null;; frontend/src/*.ts|frontend/src/*.tsx) cd frontend && bunx prettier --write \"../$f\" 2>/dev/null; cd ..;; esac; done; true'"
+      }
+    ]
+  }
+}

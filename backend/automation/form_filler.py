@@ -1,8 +1,10 @@
 """Smart form detection and filling using fuzzy string matching."""
-from thefuzz import fuzz
-from playwright.async_api import Page
+
 import asyncio
 import random
+
+from playwright.async_api import Page
+from thefuzz import fuzz
 
 
 async def fill_form(page: Page, profile: dict) -> dict:
@@ -19,9 +21,7 @@ async def fill_form(page: Page, profile: dict) -> dict:
 
     try:
         # Get all visible input fields
-        inputs = await page.query_selector_all(
-            'input:visible, textarea:visible, select:visible'
-        )
+        inputs = await page.query_selector_all("input:visible, textarea:visible, select:visible")
 
         for inp in inputs:
             try:
@@ -109,14 +109,26 @@ def _match_answer(label: str, questions: dict, profile: dict) -> str | None:
 
     # Direct profile field mapping
     field_map = {
-        "first name": "first_name", "vorname": "first_name",
-        "last name": "last_name", "nachname": "last_name",
-        "phone": "phone", "telefon": "phone", "mobile": "phone",
-        "city": "city", "stadt": "city", "ort": "city",
-        "zip": "zip_code", "plz": "zip_code", "postal": "zip_code",
-        "street": "street_address", "strasse": "street_address", "address": "street_address",
-        "salary": "salary_expectation", "gehalt": "salary_expectation",
-        "experience": "years_experience", "erfahrung": "years_experience",
+        "first name": "first_name",
+        "vorname": "first_name",
+        "last name": "last_name",
+        "nachname": "last_name",
+        "phone": "phone",
+        "telefon": "phone",
+        "mobile": "phone",
+        "city": "city",
+        "stadt": "city",
+        "ort": "city",
+        "zip": "zip_code",
+        "plz": "zip_code",
+        "postal": "zip_code",
+        "street": "street_address",
+        "strasse": "street_address",
+        "address": "street_address",
+        "salary": "salary_expectation",
+        "gehalt": "salary_expectation",
+        "experience": "years_experience",
+        "erfahrung": "years_experience",
         "linkedin": "linkedin_url",
     }
 

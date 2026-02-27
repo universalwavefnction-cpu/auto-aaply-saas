@@ -18,7 +18,14 @@ function App() {
   }, [location])
 
   if (!token) {
-    return <Login onLogin={(t: string) => { localStorage.setItem('token', t); setToken(t) }} />
+    return (
+      <Login
+        onLogin={(t: string) => {
+          localStorage.setItem('token', t)
+          setToken(t)
+        }}
+      />
+    )
   }
 
   const nav = [
@@ -31,31 +38,43 @@ function App() {
   ]
 
   return (
-    <div className="flex h-screen bg-[#050505] text-white font-sans">
+    <div className="flex h-screen bg-[#050505] font-sans text-white">
       {/* Sidebar */}
-      <nav className="w-52 border-r border-white/5 flex flex-col bg-[#080808] shrink-0">
-        <div className="p-6 border-b border-white/5">
+      <nav className="flex w-52 shrink-0 flex-col border-r border-white/5 bg-[#080808]">
+        <div className="border-b border-white/5 p-6">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-amber-500 rounded-lg flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500">
+              <svg
+                className="h-4 w-4 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
               </svg>
             </div>
             <div>
-              <span className="font-bold text-sm tracking-tight">AutoApply</span>
-              <span className="block text-[8px] text-amber-500 font-black uppercase tracking-[0.2em]">Intelligence</span>
+              <span className="text-sm font-bold tracking-tight">AutoApply</span>
+              <span className="block text-[8px] font-black uppercase tracking-[0.2em] text-amber-500">
+                Intelligence
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 py-4 space-y-1">
+        <div className="flex-1 space-y-1 py-4">
           {nav.map(({ path, icon, label }) => (
             <Link
               key={path}
               to={path}
               className={`flex items-center gap-3 px-6 py-2.5 text-[11px] font-bold uppercase tracking-[0.15em] transition-colors ${
                 location.pathname === path
-                  ? 'text-amber-500 bg-amber-500/5 border-r-2 border-amber-500'
+                  ? 'border-r-2 border-amber-500 bg-amber-500/5 text-amber-500'
                   : 'text-white/30 hover:text-white/60'
               }`}
             >
@@ -66,27 +85,36 @@ function App() {
         </div>
 
         {/* Platform status */}
-        <div className="px-6 py-4 border-t border-white/5 space-y-3">
-          <span className="text-[7px] font-black text-white/10 uppercase tracking-[0.3em]">Neural Targets</span>
+        <div className="space-y-3 border-t border-white/5 px-6 py-4">
+          <span className="text-[7px] font-black uppercase tracking-[0.3em] text-white/10">
+            Neural Targets
+          </span>
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-md">
-              <span className="text-amber-500 font-bold text-[8px] uppercase">StepStone</span>
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+            <div className="flex items-center justify-between rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5">
+              <span className="text-[8px] font-bold uppercase text-amber-500">StepStone</span>
+              <div className="h-1.5 w-1.5 rounded-full bg-amber-500"></div>
             </div>
-            <div className="flex items-center justify-between px-2 py-1.5 bg-white/[0.02] border border-white/5 rounded-md">
-              <span className="text-white/40 font-bold text-[8px] uppercase">Xing</span>
-              <div className="w-1.5 h-1.5 rounded-full bg-white/20"></div>
+            <div className="flex items-center justify-between rounded-md border border-white/5 bg-white/[0.02] px-2 py-1.5">
+              <span className="text-[8px] font-bold uppercase text-white/40">Xing</span>
+              <div className="h-1.5 w-1.5 rounded-full bg-white/20"></div>
             </div>
-            <div className="flex items-center justify-between px-2 py-1.5 bg-white/[0.02] border border-white/5 rounded-md opacity-40">
-              <span className="text-white/20 font-bold text-[8px] uppercase">LinkedIn</span>
-              <span className="text-[5px] text-white/10 uppercase font-black">Soon</span>
+            <div className="flex items-center justify-between rounded-md border border-white/5 bg-white/[0.02] px-2 py-1.5">
+              <span className="text-[8px] font-bold uppercase text-white/40">Indeed</span>
+              <div className="h-1.5 w-1.5 rounded-full bg-white/20"></div>
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-white/5 bg-white/[0.02] px-2 py-1.5">
+              <span className="text-[8px] font-bold uppercase text-white/40">LinkedIn</span>
+              <div className="h-1.5 w-1.5 rounded-full bg-white/20"></div>
             </div>
           </div>
         </div>
 
         <button
-          onClick={() => { localStorage.removeItem('token'); setToken(null) }}
-          className="flex items-center gap-3 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em] text-white/20 hover:text-red-400 border-t border-white/5 transition-colors"
+          onClick={() => {
+            localStorage.removeItem('token')
+            setToken(null)
+          }}
+          className="flex items-center gap-3 border-t border-white/5 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.15em] text-white/20 transition-colors hover:text-red-400"
         >
           ⏻ Disconnect
         </button>

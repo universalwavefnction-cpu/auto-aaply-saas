@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .database import init_db
+
+from .api import applications, auth, bot, dashboard, jobs, profile
 from .config import settings
-from .api import auth, profile, jobs, applications, dashboard, bot
+from .database import init_db
 
 app = FastAPI(title=settings.APP_NAME)
 

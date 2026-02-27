@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from pathlib import Path
+
+from pydantic_settings import BaseSettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -22,6 +23,17 @@ class Settings(BaseSettings):
     # AI form filling
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_MODEL: str = "google/gemini-2.0-flash-001"
+
+    # Residential proxy (for LinkedIn/Indeed — set in .env)
+    PROXY_URL: str = ""  # e.g. "http://user:pass@gate.smartproxy.com:7000"
+
+    # Gmail IMAP (for Indeed code-based login — set in .env)
+    GMAIL_EMAIL: str = ""  # e.g. "you@gmail.com"
+    GMAIL_APP_PASSWORD: str = ""  # 16-char app password from Google
+
+    # Gmail IMAP for LinkedIn (separate account)
+    GMAIL_EMAIL_LI: str = ""
+    GMAIL_APP_PASSWORD_LI: str = ""
 
     # Paths
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"

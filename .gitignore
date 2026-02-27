@@ -6,3 +6,22 @@ __pycache__/
 *.db
 dist/
 .vite/
+
+# Python tooling
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+coverage/
+.coverage
+*.egg-info/
+
+# Frontend tooling
+frontend/coverage/
+frontend/.eslintcache
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

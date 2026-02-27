@@ -1,9 +1,8 @@
-from sqlalchemy import (
-    Column, Integer, String, Text, Float, Boolean,
-    DateTime, ForeignKey, JSON
-)
-from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
+
 from .database import Base
 
 
@@ -113,8 +112,22 @@ class JobFilter(Base):
     autopilot_enabled = Column(Boolean, default=False)
     platform = Column(String, default="stepstone")  # "stepstone" or "xing"
     max_applications = Column(Integer, default=10)  # 1-50
+    selected_cv_id = Column(Integer, ForeignKey("cv_files.id"), nullable=True)
 
     user = relationship("User", back_populates="job_filter")
+
+
+class CVFile(Base):
+    __tablename__ = "cv_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    label = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    original_filename = Column(String)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
 
 
 class BotLog(Base):

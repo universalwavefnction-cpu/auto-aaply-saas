@@ -1,20 +1,21 @@
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from typing import Optional
 from datetime import datetime, timezone
-from ..database import get_db
-from ..models import User, Application
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
 from ..auth import get_current_user
+from ..database import get_db
+from ..models import Application, User
 
 router = APIRouter()
 
 
 @router.get("")
 def list_applications(
-    platform: Optional[str] = None,
-    status: Optional[str] = None,
-    response_status: Optional[str] = None,
+    platform: str | None = None,
+    status: str | None = None,
+    response_status: str | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -36,9 +37,14 @@ def list_applications(
         "per_page": per_page,
         "applications": [
             {
-                "id": a.id, "platform": a.platform, "job_title": a.job_title,
-                "company": a.company, "url": a.url, "status": a.status,
-                "response_status": a.response_status, "is_manual": a.is_manual,
+                "id": a.id,
+                "platform": a.platform,
+                "job_title": a.job_title,
+                "company": a.company,
+                "url": a.url,
+                "status": a.status,
+                "response_status": a.response_status,
+                "is_manual": a.is_manual,
                 "applied_at": a.applied_at.isoformat() if a.applied_at else None,
                 "notes": a.notes,
             }
@@ -54,10 +60,14 @@ def update_response(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    app = db.query(Application).filter(
-        Application.id == app_id,
-        Application.user_id == user.id,
-    ).first()
+    app = (
+        db.query(Application)
+        .filter(
+            Application.id == app_id,
+            Application.user_id == user.id,
+        )
+        .first()
+    )
     if not app:
         return {"error": "Application not found"}
     if "response_status" in data:

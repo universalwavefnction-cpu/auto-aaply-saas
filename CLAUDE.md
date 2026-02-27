@@ -1,77 +1,99 @@
-# AutoApply Web — Cloud Job Application Platform
+# AutoApply Web
 
-## What This Is
-Web-based job application automation platform. Successor to the desktop AutoApply app.
-Runs on AWS EC2, accessible via browser, auto-applies to jobs across German platforms.
+## Development Workflow
 
-## Current State (Feb 25, 2026)
-- **Phase**: Initial build — backend complete, frontend in progress
-- **Origin data**: 1,873 applications migrated from desktop app (~/.autoapply/)
-- **Platforms**: StepStone, Xing (LinkedIn planned)
+**Frontend: always use `bun`, not `npm`.** Backend uses `pip` + `ruff` + `pytest`.
+
+```sh
+# 1. Make changes
+
+# 2. Backend lint (fast)
+ruff check backend/
+
+# 3. Frontend typecheck (fast)
+cd frontend && bun run typecheck
+
+# 4. Run tests
+pytest tests/ -x -q                        # Backend
+cd frontend && bun run test                 # Frontend
+
+# 5. Lint before committing
+ruff check backend/ && cd frontend && bun run lint
+
+# 6. Before creating PR
+# Run /verify to check everything
+```
+
+### Quick Reference
+```bash
+# Backend
+uvicorn backend.main:app --reload --port 8000    # Dev server
+ruff check backend/                                # Lint
+ruff format backend/                               # Format
+pytest tests/ -x -q                                # Test
+
+# Frontend (from frontend/ dir)
+bun run dev                                        # Dev server (port 5173)
+bun run typecheck                                  # TypeScript check
+bun run lint                                       # ESLint
+bun run format                                     # Prettier
+bun run test                                       # Vitest
+bun run build                                      # Production build
+```
+
+### Slash Commands
+- `/commit-push-pr` — Stage, commit, push, create PR
+- `/verify` — Run all checks (lint + typecheck + tests, both stacks)
+- `/deploy` — Build and deploy to EC2
+- `/lint-file <path>` — Lint and fix a single file
+- `/simplify <path>` — Simplify a file (remove dead code, redundancy)
+- `/review` — Review uncommitted changes for issues
+- `/dev` — Start both dev servers
+
+## Key Conventions
+- Run backend from project root: `uvicorn backend.main:app`
+- Backend imports: `from backend.xxx import ...`
+- API routes under `/api/` prefix
+- All scrapers inherit `BaseScraper` from `backend/scrapers/base.py`
+- Form filling uses fuzzy Q&A matching from user profile
+- SQLite DB at `data/autoapply.db` — never commit
+- Uploads at `data/uploads/` — never commit
+- `bot_engine.py` is ~4500 lines — excluded from ruff lint, be careful with large edits
 
 ## Architecture
-- **Backend**: Python FastAPI + SQLAlchemy + SQLite
-- **Frontend**: React + Vite + Tailwind
+- **Backend**: Python FastAPI + SQLAlchemy + SQLite (port 8000)
+- **Frontend**: React 18 + Vite + TypeScript + Tailwind (port 5173, proxies /api to 8000)
 - **Automation**: Playwright headless browser
-- **Workers**: Background scrape + apply cycles
-- **Deploy target**: AWS EC2 (existing: ubuntu@54.170.2.102)
+- **Workers**: Celery + Redis (scrape + apply cycles)
+- **Deploy**: AWS EC2 at `ubuntu@108.130.251.241`
 
 ## Key Files
 ```
-autoapply-web/
-├── backend/
-│   ├── main.py              # FastAPI app + routes
-│   ├── config.py             # Settings (env-based)
-│   ├── models.py             # SQLAlchemy: User, Profile, Job, Application, JobFilter
-│   ├── database.py           # DB engine + session
-│   ├── auth.py               # JWT auth + password hashing
-│   ├── api/
-│   │   ├── auth.py           # Register/login/me
-│   │   ├── profile.py        # Profile CRUD, Q&A, CV upload, credentials
-│   │   ├── jobs.py           # Job search/filter, filter config
-│   │   ├── applications.py   # Application tracking, manual apply
-│   │   └── dashboard.py      # Stats/analytics
-│   ├── scrapers/
-│   │   ├── base.py           # BaseScraper (Playwright lifecycle)
-│   │   ├── stepstone.py      # StepStone search + apply
-│   │   └── xing.py           # Xing search + apply
-│   ├── automation/
-│   │   └── form_filler.py    # Smart form detection (fuzzy match Q&A)
-│   └── workers/
-│       ├── scrape_worker.py  # Background job discovery
-│       └── apply_worker.py   # Background auto-apply
-├── frontend/                  # React dashboard
-├── migrate_from_desktop.py    # Import from ~/.autoapply/
-├── requirements.txt
-└── CLAUDE.md
+backend/
+├── main.py              # FastAPI app + routes + /api/health
+├── config.py            # Settings (env-based)
+├── models.py            # SQLAlchemy models
+├── database.py          # DB engine + session
+├── auth.py              # JWT auth
+├── bot_engine.py        # All platform logic (~4500 lines)
+├── api/                 # Route modules (auth, profile, jobs, applications, dashboard, bot)
+├── scrapers/            # Platform scrapers (stepstone, xing)
+├── automation/          # Form filler (fuzzy Q&A matching)
+└── workers/             # Celery tasks (scrape_worker, apply_worker)
+frontend/src/
+├── App.tsx              # Router + sidebar layout
+├── api.ts               # API client
+└── pages/               # Dashboard, Jobs, Applications, Profile, Settings, BotLive
 ```
 
-## Database (SQLite → data/autoapply.db)
-- **users**: id, email, password_hash
-- **profiles**: personal info, salary, experience, questions_json (Q&A pairs)
-- **credentials**: platform login (stepstone, xing, linkedin)
-- **jobs**: scraped listings (title, company, location, url, salary range)
-- **applications**: tracking (status, response_status, error_log)
-- **job_filters**: search config, blacklists, autopilot toggle
+## Database (SQLite)
+- users, profiles, credentials, jobs, applications, job_filters
+- See `backend/models.py` for full schema
 
-## How It Works
-1. User configures profile + Q&A pairs + platform credentials
-2. Scrape worker discovers jobs matching filters
-3. Jobs appear in dashboard for browsing
-4. Autopilot mode: apply worker auto-fills forms using fuzzy Q&A matching
-5. Manual mode: user clicks "Apply" on specific jobs, gets redirected
-
-## Run Locally
-```bash
-cd ~/autoapply-web
-pip install -r requirements.txt
-python migrate_from_desktop.py  # Import old data
-uvicorn backend.main:app --reload --port 8000
-cd frontend && npm install && npm run dev  # Port 5173
-```
-
-## Lessons from Desktop App
+## Platforms
+- StepStone (working), Xing (working), Indeed (Cloudflare issues), LinkedIn (working)
 - Xing has 20.9% success rate (best), StepStone 1.6% (worst)
-- Fix Q&A inconsistencies before running (salary, experience, English C1)
+
+## Anti-Detection
+- Random delays, realistic UA, human-like typing speed
 - Use blacklist to skip companies that already rejected
-- Anti-detection: random delays, realistic UA, human-like typing speed

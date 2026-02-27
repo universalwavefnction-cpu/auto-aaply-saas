@@ -1,5 +1,6 @@
-from .base import BaseScraper
 from datetime import datetime, timezone
+
+from .base import BaseScraper
 
 
 class XingScraper(BaseScraper):
@@ -31,9 +32,7 @@ class XingScraper(BaseScraper):
             await self.page.goto(f"{self.BASE_URL}/jobs/search?{params}")
             await self.random_delay(2, 4)
 
-            cards = await self.page.query_selector_all(
-                '[data-testid="job-posting-card"], .jobPosting-listItem'
-            )
+            cards = await self.page.query_selector_all('[data-testid="job-posting-card"], .jobPosting-listItem')
             for card in cards:
                 try:
                     title_el = await card.query_selector('a[data-testid="job-title"], h3 a, a.jobPosting-title')
@@ -47,14 +46,16 @@ class XingScraper(BaseScraper):
 
                     if title and href:
                         url = href if href.startswith("http") else f"{self.BASE_URL}{href}"
-                        jobs.append({
-                            "platform": self.PLATFORM,
-                            "title": title.strip(),
-                            "company": company.strip(),
-                            "location": loc.strip(),
-                            "url": url,
-                            "scraped_at": datetime.now(timezone.utc).isoformat(),
-                        })
+                        jobs.append(
+                            {
+                                "platform": self.PLATFORM,
+                                "title": title.strip(),
+                                "company": company.strip(),
+                                "location": loc.strip(),
+                                "url": url,
+                                "scraped_at": datetime.now(timezone.utc).isoformat(),
+                            }
+                        )
                 except Exception:
                     continue
         except Exception as e:
@@ -76,6 +77,7 @@ class XingScraper(BaseScraper):
             await self.random_delay(2, 4)
 
             from ..automation.form_filler import fill_form
+
             result = await fill_form(self.page, profile)
             return result
 

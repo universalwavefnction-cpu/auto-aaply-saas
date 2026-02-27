@@ -1,6 +1,7 @@
-from .base import BaseScraper
-from datetime import datetime, timezone
 import asyncio
+from datetime import datetime, timezone
+
+from .base import BaseScraper
 
 
 class StepStoneScraper(BaseScraper):
@@ -9,7 +10,7 @@ class StepStoneScraper(BaseScraper):
 
     async def _accept_cookies(self):
         try:
-            consent = await self.page.query_selector('#onetrust-accept-btn-handler')
+            consent = await self.page.query_selector("#onetrust-accept-btn-handler")
             if consent:
                 await consent.click()
                 await asyncio.sleep(1)
@@ -58,14 +59,16 @@ class StepStoneScraper(BaseScraper):
 
                     if title and href:
                         url = href if href.startswith("http") else f"{self.BASE_URL}{href}"
-                        jobs.append({
-                            "platform": self.PLATFORM,
-                            "title": title,
-                            "company": company,
-                            "location": loc,
-                            "url": url,
-                            "scraped_at": datetime.now(timezone.utc).isoformat(),
-                        })
+                        jobs.append(
+                            {
+                                "platform": self.PLATFORM,
+                                "title": title,
+                                "company": company,
+                                "location": loc,
+                                "url": url,
+                                "scraped_at": datetime.now(timezone.utc).isoformat(),
+                            }
+                        )
                 except Exception:
                     continue
         except Exception as e:
@@ -89,6 +92,7 @@ class StepStoneScraper(BaseScraper):
             await self.random_delay(2, 4)
 
             from ..automation.form_filler import fill_form
+
             result = await fill_form(self.page, profile)
             return result
 

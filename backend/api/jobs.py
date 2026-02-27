@@ -1,20 +1,20 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from typing import Optional
-from ..database import get_db
-from ..models import User, Job, JobFilter
+from sqlalchemy.orm import Session
+
 from ..auth import get_current_user
+from ..database import get_db
+from ..models import Job, JobFilter, User
 
 router = APIRouter()
 
 
 @router.get("")
 def list_jobs(
-    platform: Optional[str] = None,
-    search: Optional[str] = None,
-    location: Optional[str] = None,
-    remote: Optional[bool] = None,
+    platform: str | None = None,
+    search: str | None = None,
+    location: str | None = None,
+    remote: bool | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -38,10 +38,15 @@ def list_jobs(
         "per_page": per_page,
         "jobs": [
             {
-                "id": j.id, "platform": j.platform, "title": j.title,
-                "company": j.company, "location": j.location,
-                "salary_min": j.salary_min, "salary_max": j.salary_max,
-                "url": j.url, "remote": j.remote,
+                "id": j.id,
+                "platform": j.platform,
+                "title": j.title,
+                "company": j.company,
+                "location": j.location,
+                "salary_min": j.salary_min,
+                "salary_max": j.salary_max,
+                "url": j.url,
+                "remote": j.remote,
                 "scraped_at": j.scraped_at.isoformat() if j.scraped_at else None,
             }
             for j in jobs
@@ -55,11 +60,17 @@ def get_job(job_id: int, user: User = Depends(get_current_user), db: Session = D
     if not job:
         return {"error": "Job not found"}
     return {
-        "id": job.id, "platform": job.platform, "title": job.title,
-        "company": job.company, "location": job.location,
-        "salary_min": job.salary_min, "salary_max": job.salary_max,
-        "description": job.description, "url": job.url,
-        "remote": job.remote, "scraped_at": job.scraped_at.isoformat() if job.scraped_at else None,
+        "id": job.id,
+        "platform": job.platform,
+        "title": job.title,
+        "company": job.company,
+        "location": job.location,
+        "salary_min": job.salary_min,
+        "salary_max": job.salary_max,
+        "description": job.description,
+        "url": job.url,
+        "remote": job.remote,
+        "scraped_at": job.scraped_at.isoformat() if job.scraped_at else None,
     }
 
 
@@ -79,6 +90,7 @@ def get_filters(user: User = Depends(get_current_user), db: Session = Depends(ge
         "autopilot_enabled": f.autopilot_enabled,
         "platform": f.platform or "stepstone",
         "max_applications": f.max_applications or 10,
+        "selected_cv_id": f.selected_cv_id,
     }
 
 

@@ -1,20 +1,19 @@
 """Bot control API: start/stop, SSE stream, screenshots, log analytics."""
+
 import asyncio
 import json
-from pathlib import Path
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
 from jose import JWTError, jwt
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..models import User, BotLog
 from ..auth import get_current_user
+from ..bot_engine import SCREENSHOT_DIR, BotEngine
 from ..config import settings
-from ..bot_engine import BotEngine, SCREENSHOT_DIR
+from ..database import get_db
+from ..models import BotLog, User
 
 router = APIRouter()
 
@@ -102,11 +101,11 @@ async def stream_events(
                     yield f"event: {event_type}\ndata: {data}\n\n"
                 except asyncio.TimeoutError:
                     # Send keepalive
-                    yield f"event: ping\ndata: {{}}\n\n"
+                    yield "event: ping\ndata: {}\n\n"
         except asyncio.CancelledError:
             pass
         finally:
-            yield f"event: done\ndata: {{}}\n\n"
+            yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -128,6 +127,7 @@ async def get_screenshot(user: User = Depends(get_current_user)):
 
 
 # ── Log Analytics Endpoints ──────────────────────────────────────────────
+
 
 @router.get("/logs/sessions")
 def list_sessions(
@@ -152,24 +152,22 @@ def list_sessions(
     result = []
     for s in sessions:
         # Get session stats from the session_end log
-        end_log = (
-            db.query(BotLog)
-            .filter(BotLog.session_id == s.session_id, BotLog.event == "session_end")
-            .first()
-        )
+        end_log = db.query(BotLog).filter(BotLog.session_id == s.session_id, BotLog.event == "session_end").first()
         stats = end_log.data.get("stats", {}) if end_log and end_log.data else {}
 
-        result.append({
-            "session_id": s.session_id,
-            "started_at": s.started_at.isoformat() if s.started_at else None,
-            "ended_at": s.ended_at.isoformat() if s.ended_at else None,
-            "log_count": s.log_count,
-            "applied": stats.get("applied", 0),
-            "failed": stats.get("failed", 0),
-            "skipped": stats.get("skipped", 0),
-            "fields_filled": stats.get("fields_filled", 0),
-            "fields_total": stats.get("fields_total", 0),
-        })
+        result.append(
+            {
+                "session_id": s.session_id,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "ended_at": s.ended_at.isoformat() if s.ended_at else None,
+                "log_count": s.log_count,
+                "applied": stats.get("applied", 0),
+                "failed": stats.get("failed", 0),
+                "skipped": stats.get("skipped", 0),
+                "fields_filled": stats.get("fields_filled", 0),
+                "fields_total": stats.get("fields_total", 0),
+            }
+        )
 
     return {"sessions": result}
 
@@ -218,25 +216,25 @@ def log_analytics(
     db: Session = Depends(get_db),
 ):
     """Aggregate analytics across all sessions."""
-    total_sessions = db.query(func.count(func.distinct(BotLog.session_id))).filter(
-        BotLog.user_id == user.id
-    ).scalar()
+    total_sessions = db.query(func.count(func.distinct(BotLog.session_id))).filter(BotLog.user_id == user.id).scalar()
 
-    total_fields_filled = db.query(func.count(BotLog.id)).filter(
-        BotLog.user_id == user.id, BotLog.event == "field_filled"
-    ).scalar()
+    total_fields_filled = (
+        db.query(func.count(BotLog.id)).filter(BotLog.user_id == user.id, BotLog.event == "field_filled").scalar()
+    )
 
-    total_fields_skipped = db.query(func.count(BotLog.id)).filter(
-        BotLog.user_id == user.id, BotLog.event == "field_skipped"
-    ).scalar()
+    total_fields_skipped = (
+        db.query(func.count(BotLog.id)).filter(BotLog.user_id == user.id, BotLog.event == "field_skipped").scalar()
+    )
 
-    total_applies = db.query(func.count(BotLog.id)).filter(
-        BotLog.user_id == user.id, BotLog.event == "success"
-    ).scalar()
+    total_applies = (
+        db.query(func.count(BotLog.id)).filter(BotLog.user_id == user.id, BotLog.event == "success").scalar()
+    )
 
-    total_failures = db.query(func.count(BotLog.id)).filter(
-        BotLog.user_id == user.id, BotLog.event.in_(["no_fields_matched", "error", "no_button"])
-    ).scalar()
+    total_failures = (
+        db.query(func.count(BotLog.id))
+        .filter(BotLog.user_id == user.id, BotLog.event.in_(["no_fields_matched", "error", "no_button"]))
+        .scalar()
+    )
 
     fill_rate = (total_fields_filled / max(total_fields_filled + total_fields_skipped, 1)) * 100
 
@@ -276,9 +274,6 @@ def unmatched_fields(
     sorted_labels = sorted(label_counts.items(), key=lambda x: x[1], reverse=True)
 
     return {
-        "unmatched_fields": [
-            {"label": label, "count": count}
-            for label, count in sorted_labels[:50]
-        ],
+        "unmatched_fields": [{"label": label, "count": count} for label, count in sorted_labels[:50]],
         "total_unique": len(label_counts),
     }

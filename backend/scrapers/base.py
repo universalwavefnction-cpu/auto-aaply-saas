@@ -1,8 +1,10 @@
-from abc import ABC, abstractmethod
-from playwright.async_api import async_playwright, Browser, Page
-from ..config import settings
 import asyncio
 import random
+from abc import ABC, abstractmethod
+
+from playwright.async_api import Browser, Page, async_playwright
+
+from ..config import settings
 
 
 class BaseScraper(ABC):
@@ -23,8 +25,7 @@ class BaseScraper(ABC):
         context = await self.browser.new_context(
             viewport={"width": 1366, "height": 768},
             user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             ),
             locale="de-DE",
         )

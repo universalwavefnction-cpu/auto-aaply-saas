@@ -1,28 +1,29 @@
-from fastapi import APIRouter, Depends, UploadFile, File
-from sqlalchemy.orm import Session
+import shutil
+
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
-from typing import Optional
-from ..database import get_db
-from ..models import User, Profile, PlatformCredential
+from sqlalchemy.orm import Session
+
 from ..auth import get_current_user
 from ..config import settings
-import shutil
+from ..database import get_db
+from ..models import CVFile, PlatformCredential, Profile, User
 
 router = APIRouter()
 
 
 class ProfileUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone: Optional[str] = None
-    city: Optional[str] = None
-    zip_code: Optional[str] = None
-    street_address: Optional[str] = None
-    salary_expectation: Optional[int] = None
-    years_experience: Optional[int] = None
-    linkedin_url: Optional[str] = None
-    summary: Optional[str] = None
-    questions_json: Optional[dict] = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    city: str | None = None
+    zip_code: str | None = None
+    street_address: str | None = None
+    salary_expectation: int | None = None
+    years_experience: int | None = None
+    linkedin_url: str | None = None
+    summary: str | None = None
+    questions_json: dict | None = None
 
 
 class CredentialCreate(BaseModel):
@@ -37,18 +38,21 @@ def get_profile(user: User = Depends(get_current_user), db: Session = Depends(ge
     creds = db.query(PlatformCredential).filter(PlatformCredential.user_id == user.id).all()
     return {
         "profile": {
-            "first_name": p.first_name, "last_name": p.last_name,
-            "phone": p.phone, "city": p.city, "zip_code": p.zip_code,
+            "first_name": p.first_name,
+            "last_name": p.last_name,
+            "phone": p.phone,
+            "city": p.city,
+            "zip_code": p.zip_code,
             "street_address": p.street_address,
             "salary_expectation": p.salary_expectation,
             "years_experience": p.years_experience,
-            "linkedin_url": p.linkedin_url, "summary": p.summary,
+            "linkedin_url": p.linkedin_url,
+            "summary": p.summary,
             "cv_path": p.cv_path,
             "questions_json": p.questions_json or {},
         },
         "credentials": [
-            {"id": c.id, "platform": c.platform, "email": c.email, "is_active": c.is_active}
-            for c in creds
+            {"id": c.id, "platform": c.platform, "email": c.email, "is_active": c.is_active} for c in creds
         ],
     }
 
@@ -69,16 +73,53 @@ def update_profile(
 @router.post("/cv")
 def upload_cv(
     file: UploadFile = File(...),
+    label: str = "My CV",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    dest = settings.UPLOAD_DIR / f"cv_{user.id}_{file.filename}"
+    import re
+
+    safe_name = re.sub(r"[^\w\-.]", "_", file.filename or "cv.pdf")
+    dest = settings.UPLOAD_DIR / f"cv_{user.id}_{safe_name}"
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    p = db.query(Profile).filter(Profile.user_id == user.id).first()
-    p.cv_path = str(dest)
+    cv = CVFile(user_id=user.id, label=label, file_path=str(dest), original_filename=file.filename)
+    db.add(cv)
     db.commit()
-    return {"cv_path": str(dest)}
+    return {
+        "id": cv.id,
+        "label": cv.label,
+        "filename": cv.original_filename,
+        "created_at": cv.created_at.isoformat() if cv.created_at else None,
+    }
+
+
+@router.get("/cvs")
+def list_cvs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cvs = db.query(CVFile).filter(CVFile.user_id == user.id).order_by(CVFile.created_at.desc()).all()
+    return [
+        {
+            "id": c.id,
+            "label": c.label,
+            "filename": c.original_filename,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in cvs
+    ]
+
+
+@router.delete("/cv/{cv_id}")
+def delete_cv(cv_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    import os
+
+    cv = db.query(CVFile).filter(CVFile.id == cv_id, CVFile.user_id == user.id).first()
+    if not cv:
+        return {"error": "CV not found"}
+    if cv.file_path and os.path.exists(cv.file_path):
+        os.remove(cv.file_path)
+    db.delete(cv)
+    db.commit()
+    return {"status": "deleted"}
 
 
 @router.post("/credentials")
@@ -104,10 +145,14 @@ def delete_credential(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    cred = db.query(PlatformCredential).filter(
-        PlatformCredential.id == cred_id,
-        PlatformCredential.user_id == user.id,
-    ).first()
+    cred = (
+        db.query(PlatformCredential)
+        .filter(
+            PlatformCredential.id == cred_id,
+            PlatformCredential.user_id == user.id,
+        )
+        .first()
+    )
     if cred:
         db.delete(cred)
         db.commit()

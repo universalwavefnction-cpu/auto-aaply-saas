@@ -1,12 +1,14 @@
 """Background worker for auto-applying to discovered jobs."""
+
 import asyncio
 from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
+
 from ..database import SessionLocal
-from ..models import Job, Application, Profile, PlatformCredential, JobFilter
+from ..models import Application, Job, JobFilter, PlatformCredential, Profile
 from ..scrapers.stepstone import StepStoneScraper
 from ..scrapers.xing import XingScraper
-
 
 SCRAPERS = {
     "stepstone": StepStoneScraper,
@@ -22,10 +24,14 @@ async def run_apply_cycle(user_id: int, max_applications: int = 10):
     try:
         profile = db.query(Profile).filter(Profile.user_id == user_id).first()
         job_filter = db.query(JobFilter).filter(JobFilter.user_id == user_id).first()
-        creds = db.query(PlatformCredential).filter(
-            PlatformCredential.user_id == user_id,
-            PlatformCredential.is_active == True,
-        ).all()
+        creds = (
+            db.query(PlatformCredential)
+            .filter(
+                PlatformCredential.user_id == user_id,
+                PlatformCredential.is_active == True,
+            )
+            .all()
+        )
 
         if not profile or not job_filter or not job_filter.autopilot_enabled:
             results["errors"].append("Autopilot not enabled or profile missing")
@@ -33,9 +39,7 @@ async def run_apply_cycle(user_id: int, max_applications: int = 10):
 
         # Get already-applied URLs
         applied_urls = set(
-            row[0] for row in
-            db.query(Application.url).filter(Application.user_id == user_id).all()
-            if row[0]
+            row[0] for row in db.query(Application.url).filter(Application.user_id == user_id).all() if row[0]
         )
 
         # Build profile dict for form filler
@@ -62,10 +66,15 @@ async def run_apply_cycle(user_id: int, max_applications: int = 10):
                 continue
 
             # Get unapplied jobs for this platform
-            unapplied = db.query(Job).filter(
-                Job.platform == platform,
-                ~Job.url.in_(applied_urls),
-            ).limit(max_applications - applied_count).all()
+            unapplied = (
+                db.query(Job)
+                .filter(
+                    Job.platform == platform,
+                    ~Job.url.in_(applied_urls),
+                )
+                .limit(max_applications - applied_count)
+                .all()
+            )
 
             if not unapplied:
                 continue

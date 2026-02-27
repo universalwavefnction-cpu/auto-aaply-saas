@@ -1,12 +1,14 @@
 """Background worker for job discovery across platforms."""
+
 import asyncio
 from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
+
 from ..database import SessionLocal
 from ..models import Job, JobFilter, PlatformCredential
 from ..scrapers.stepstone import StepStoneScraper
 from ..scrapers.xing import XingScraper
-
 
 SCRAPERS = {
     "stepstone": StepStoneScraper,
@@ -21,10 +23,14 @@ async def run_scrape_cycle(user_id: int):
 
     try:
         job_filter = db.query(JobFilter).filter(JobFilter.user_id == user_id).first()
-        creds = db.query(PlatformCredential).filter(
-            PlatformCredential.user_id == user_id,
-            PlatformCredential.is_active == True,
-        ).all()
+        creds = (
+            db.query(PlatformCredential)
+            .filter(
+                PlatformCredential.user_id == user_id,
+                PlatformCredential.is_active == True,
+            )
+            .all()
+        )
 
         if not job_filter or not job_filter.job_titles:
             results["errors"].append("No job titles configured")
@@ -44,7 +50,7 @@ async def run_scrape_cycle(user_id: int):
                     continue
 
                 for title in job_filter.job_titles:
-                    for location in (job_filter.locations or [""]):
+                    for location in job_filter.locations or [""]:
                         jobs = await scraper.search_jobs(title, location)
                         for job_data in jobs:
                             # Skip blacklisted
@@ -58,14 +64,16 @@ async def run_scrape_cycle(user_id: int):
                             # Upsert job
                             existing = db.query(Job).filter(Job.url == job_data["url"]).first()
                             if not existing:
-                                db.add(Job(
-                                    platform=job_data["platform"],
-                                    title=job_data["title"],
-                                    company=job_data.get("company"),
-                                    location=job_data.get("location"),
-                                    url=job_data["url"],
-                                    scraped_at=datetime.now(timezone.utc),
-                                ))
+                                db.add(
+                                    Job(
+                                        platform=job_data["platform"],
+                                        title=job_data["title"],
+                                        company=job_data.get("company"),
+                                        location=job_data.get("location"),
+                                        url=job_data["url"],
+                                        scraped_at=datetime.now(timezone.utc),
+                                    )
+                                )
                                 results["jobs_found"] += 1
 
                         await asyncio.sleep(2)  # Rate limit between searches

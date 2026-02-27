@@ -13,7 +13,7 @@ async function request(path: string, options: RequestInit = {}) {
   }
   const headers: Record<string, string> = {
     ...defaultHeaders,
-    ...(options.headers as Record<string, string> || {}),
+    ...((options.headers as Record<string, string>) || {}),
   }
 
   const res = await fetch(`${BASE}${path}`, { ...options, headers })
@@ -42,8 +42,25 @@ export const api = {
   // Profile
   getProfile: () => request('/profile'),
   updateProfile: (data: any) => request('/profile', { method: 'PUT', body: JSON.stringify(data) }),
-  addCredential: (data: any) => request('/profile/credentials', { method: 'POST', body: JSON.stringify(data) }),
+  addCredential: (data: any) =>
+    request('/profile/credentials', { method: 'POST', body: JSON.stringify(data) }),
   deleteCredential: (id: number) => request(`/profile/credentials/${id}`, { method: 'DELETE' }),
+
+  // CVs
+  listCVs: () => request('/profile/cvs'),
+  uploadCV: async (file: File, label: string) => {
+    const token = getToken()
+    const form = new FormData()
+    form.append('file', file)
+    form.append('label', label)
+    const res = await fetch(`${BASE}/profile/cv?label=${encodeURIComponent(label)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    })
+    return res.json()
+  },
+  deleteCV: (id: number) => request(`/profile/cv/${id}`, { method: 'DELETE' }),
 
   // Jobs
   getJobs: (params: Record<string, any> = {}) => {
@@ -52,7 +69,8 @@ export const api = {
   },
   getJob: (id: number) => request(`/jobs/${id}`),
   getFilters: () => request('/jobs/filters/current'),
-  updateFilters: (data: any) => request('/jobs/filters', { method: 'PUT', body: JSON.stringify(data) }),
+  updateFilters: (data: any) =>
+    request('/jobs/filters', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Applications
   getApplications: (params: Record<string, any> = {}) => {
