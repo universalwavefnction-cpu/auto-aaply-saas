@@ -19,6 +19,10 @@ export default function Profile() {
   const [newA, setNewA] = useState('')
   const [newCred, setNewCred] = useState({ platform: 'stepstone', email: '', password: '' })
   const [saved, setSaved] = useState(false)
+  const [cvs, setCvs] = useState<any[]>([])
+  const [cvLabel, setCvLabel] = useState('')
+  const [cvFile, setCvFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
     api.getProfile().then(res => {
@@ -26,6 +30,7 @@ export default function Profile() {
       setCredentials(res.credentials || [])
       setQuestions(res.profile?.questions_json || {})
     })
+    api.listCVs().then(res => { if (Array.isArray(res)) setCvs(res) })
   }, [])
 
   const saveProfile = async () => {
@@ -81,6 +86,63 @@ export default function Profile() {
           <label className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-2">Summary</label>
           <textarea value={profile.summary || ''} onChange={e => { const v = e.target.value; setProfile((p: any) => ({ ...p, summary: v })) }} rows={3}
             className="w-full px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500/30" />
+        </div>
+      </div>
+
+      {/* CV Library */}
+      <div className="bg-[#0A0A0A] border border-white/5 rounded-xl p-6">
+        <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-4">CV Library ({cvs.length} files)</span>
+        <div className="space-y-2 mb-4">
+          {cvs.map(cv => (
+            <div key={cv.id} className="flex items-center justify-between px-3 py-2.5 bg-black border border-white/5 rounded-lg">
+              <div className="flex items-center gap-3">
+                <span className="text-[9px] font-black text-amber-500 uppercase tracking-wider">PDF</span>
+                <span className="text-sm text-white/60">{cv.label}</span>
+                <span className="text-[10px] text-white/20">{cv.filename}</span>
+              </div>
+              <button onClick={async () => {
+                await api.deleteCV(cv.id)
+                setCvs(cvs.filter((x: any) => x.id !== cv.id))
+              }} className="text-white/10 hover:text-red-400 text-[9px] font-bold uppercase tracking-wider transition-colors">
+                Remove
+              </button>
+            </div>
+          ))}
+          {cvs.length === 0 && (
+            <p className="text-[10px] text-white/10 italic px-3">No CVs uploaded — add one below to attach to applications</p>
+          )}
+        </div>
+        <div className="border-t border-white/5 pt-4">
+          <span className="text-[8px] font-black text-white/10 uppercase tracking-[0.2em] block mb-3">Upload CV</span>
+          <div className="flex gap-2">
+            <input
+              value={cvLabel}
+              onChange={e => setCvLabel(e.target.value)}
+              placeholder="Label (e.g. Management CV)"
+              className="w-48 px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white placeholder:text-white/15 focus:outline-none focus:border-amber-500/30"
+            />
+            <label className="flex-1 flex items-center px-4 py-2.5 bg-black border border-white/5 rounded-xl cursor-pointer hover:border-white/10 transition-colors">
+              <span className="text-sm text-white/30 truncate">{cvFile ? cvFile.name : 'Choose PDF...'}</span>
+              <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={e => setCvFile(e.target.files?.[0] || null)} />
+            </label>
+            <button
+              onClick={async () => {
+                if (!cvFile || !cvLabel.trim()) return
+                setUploading(true)
+                const res = await api.uploadCV(cvFile, cvLabel.trim())
+                if (res && !res.error) {
+                  setCvs([res, ...cvs])
+                  setCvLabel('')
+                  setCvFile(null)
+                }
+                setUploading(false)
+              }}
+              disabled={!cvFile || !cvLabel.trim() || uploading}
+              className="px-4 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 hover:bg-amber-500/20 font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {uploading ? '...' : 'Upload'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -143,6 +205,7 @@ export default function Profile() {
             >
               <option value="stepstone">StepStone</option>
               <option value="xing">Xing</option>
+              <option value="indeed">Indeed</option>
               <option value="linkedin">LinkedIn</option>
             </select>
             <input

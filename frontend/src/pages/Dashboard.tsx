@@ -8,11 +8,14 @@ export default function Dashboard() {
   const [location, setLocation] = useState('')
   const [platform, setPlatform] = useState('stepstone')
   const [maxApps, setMaxApps] = useState(10)
+  const [selectedCv, setSelectedCv] = useState<number | null>(null)
+  const [cvs, setCvs] = useState<any[]>([])
   const [launching, setLaunching] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
     api.getStats().then(setStats)
+    api.listCVs().then(res => { if (Array.isArray(res)) setCvs(res) })
     // Pre-fill from saved filters
     api.getFilters().then(f => {
       if (f && !f.error) {
@@ -20,6 +23,7 @@ export default function Dashboard() {
         if (f.locations?.length) setLocation(f.locations[0])
         if (f.platform) setPlatform(f.platform)
         if (f.max_applications) setMaxApps(f.max_applications)
+        if (f.selected_cv_id) setSelectedCv(f.selected_cv_id)
       }
     })
   }, [])
@@ -33,6 +37,7 @@ export default function Dashboard() {
       locations: location.trim() ? [location.trim()] : ['deutschland'],
       platform,
       max_applications: maxApps,
+      selected_cv_id: selectedCv,
     })
     await api.startBot('scrape_and_apply')
     navigate('/bot')
@@ -101,10 +106,10 @@ export default function Dashboard() {
               className="w-full px-5 py-4 bg-black border border-white/10 rounded-xl text-white text-lg placeholder:text-white/15 focus:outline-none focus:border-amber-500/50 transition-colors"
             />
           </div>
-          <div className="w-44">
+          <div className="w-56">
             <label className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] block mb-2">Platform</label>
             <div className="flex gap-1.5">
-              {(['stepstone', 'xing', 'linkedin'] as const).map(p => (
+              {(['stepstone', 'xing', 'indeed', 'linkedin'] as const).map(p => (
                 <button
                   key={p}
                   onClick={() => setPlatform(p)}
@@ -117,7 +122,7 @@ export default function Dashboard() {
                   }`}
                   disabled={p === 'linkedin'}
                 >
-                  {p === 'linkedin' ? <span title="Coming soon">LI</span> : p === 'stepstone' ? 'SS' : 'XI'}
+                  {p === 'linkedin' ? <span title="Coming soon">LI</span> : p === 'stepstone' ? 'SS' : p === 'indeed' ? 'IN' : 'XI'}
                 </button>
               ))}
             </div>
@@ -132,18 +137,33 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
-        {/* Applications slider — own row */}
-        <div className="flex items-center gap-4 mt-4 pt-4 border-t border-white/5">
-          <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">How many applications?</span>
-          <input
-            type="range"
-            min={1}
-            max={500}
-            value={maxApps}
-            onChange={e => setMaxApps(Number(e.target.value))}
-            className="w-64 accent-amber-500 h-1.5"
-          />
-          <span className="text-amber-500 font-black text-2xl w-10 text-center tabular-nums">{maxApps}</span>
+        {/* Applications slider + CV picker — own row */}
+        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-white/5">
+          <div className="flex items-center gap-3">
+            <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] whitespace-nowrap">Applications</span>
+            <input
+              type="range"
+              min={1}
+              max={500}
+              value={maxApps}
+              onChange={e => setMaxApps(Number(e.target.value))}
+              className="w-40 accent-amber-500 h-1.5"
+            />
+            <span className="text-amber-500 font-black text-xl w-8 text-center tabular-nums">{maxApps}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] whitespace-nowrap">CV</span>
+            <select
+              value={selectedCv || ''}
+              onChange={e => setSelectedCv(e.target.value ? Number(e.target.value) : null)}
+              className="px-3 py-1.5 bg-black border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500/30 appearance-none cursor-pointer"
+            >
+              <option value="">No CV (use platform default)</option>
+              {cvs.map((cv: any) => (
+                <option key={cv.id} value={cv.id}>{cv.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
         <p className="text-[10px] text-white/15 mt-3">Type a job title, pick a city, hit Go — the bot scrapes jobs and auto-applies for you.</p>
       </div>
@@ -168,7 +188,7 @@ export default function Dashboard() {
               const max = Math.max(...platformData.map(([, v]) => v))
               const pct = (count / max) * 100
               const colors: Record<string, string> = {
-                stepstone: 'bg-amber-500', xing: 'bg-emerald-500', linkedin: 'bg-blue-500', testplatform: 'bg-white/20'
+                stepstone: 'bg-amber-500', xing: 'bg-emerald-500', indeed: 'bg-purple-500', linkedin: 'bg-blue-500', testplatform: 'bg-white/20'
               }
               return (
                 <div key={name} className="space-y-1">

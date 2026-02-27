@@ -6,6 +6,7 @@ import re
 import time
 import uuid
 import random
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -331,6 +332,17 @@ class BotEngine:
                 if not label_text:
                     continue
 
+                # Skip search/navigation fields — these are NOT application form fields
+                search_indicators = ["search", "suche", "find job", "e.g.", "z.b.", "filter"]
+                if any(si in label_text.lower() for si in search_indicators):
+                    continue
+                # Skip fields with search-related roles or names
+                role = await inp.get_attribute("role") or ""
+                if role in ("search", "searchbox", "combobox"):
+                    continue
+                if any(si in name.lower() for si in ["search", "query", "keyword", "q"]):
+                    continue
+
                 field_info = {
                     "index": idx,
                     "label": label_text,
@@ -419,9 +431,11 @@ INSTRUCTIONS:
 - For salary fields, use the number only (no currency symbol)
 - Answer in the same language as the form (usually German)
 - Be smart about matching — "Vorname" = first_name, "Nachname" = last_name, "Telefon" = phone, etc.
+- For phone number fields: use DIGITS ONLY without spaces, dashes, or country code prefix (e.g. "15561057765" not "+49 155 610 577 65"). The country code is usually in a separate dropdown.
+- Do NOT fill search/filter fields (job search, location search, etc.) — only fill application form fields.
 
 Respond ONLY with a JSON object mapping field index (as string) to answer. Example:
-{{"0": "Max", "1": "Mustermann", "2": "+49 123 456", "3": null}}"""
+{{"0": "Max", "1": "Mustermann", "2": "15512345678", "3": null}}"""
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -539,6 +553,20 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 answer = str(answer)
                 tag = field["tag"]
                 input_type = field["type"]
+                label_lower = label.lower()
+
+                # Phone number cleanup — strip spaces, dashes, parens
+                # If there's a separate country code field, remove +49 prefix
+                if any(kw in label_lower for kw in ["phone", "telefon", "mobil", "handy", "rufnummer"]):
+                    phone_clean = answer.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                    # Remove country code prefix if present (form likely has separate country code dropdown)
+                    if phone_clean.startswith("+49"):
+                        phone_clean = phone_clean[3:]
+                    elif phone_clean.startswith("0049"):
+                        phone_clean = phone_clean[4:]
+                    elif phone_clean.startswith("0"):
+                        phone_clean = phone_clean[1:]
+                    answer = phone_clean
 
                 if input_type == "checkbox":
                     if answer.lower() in ("yes", "ja", "true", "1"):
@@ -742,6 +770,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if mode in ("scrape_and_apply", "scrape"):
                 if platform == "xing":
                     scraped_job_ids = await self._scrape_phase_xing(db, job_filter, profile)
+                elif platform == "indeed":
+                    scraped_job_ids = await self._scrape_phase_indeed(db, job_filter, profile)
                 else:
                     scraped_job_ids = await self._scrape_phase(db, job_filter, profile)
 
@@ -749,6 +779,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if mode in ("scrape_and_apply", "apply") and self.running:
                 if platform == "xing":
                     await self._apply_phase_xing(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
+                elif platform == "indeed":
+                    await self._apply_phase_indeed(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
                 else:
                     await self._apply_phase(db, profile, creds, job_filter, scraped_job_ids=scraped_job_ids)
 
@@ -2599,6 +2631,732 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 await self.log("error", "apply", "error", {
                     "message": f"  ERROR: {str(e)[:100]}",
                 }, job_id=job.id, platform="xing")
+                await self.emit_progress()
+
+            if i < len(jobs) - 1 and self.running:
+                delay = random.uniform(20, 35)
+                await self.log("info", "system", "delay", {
+                    "message": f"  Waiting {delay:.0f}s before next...",
+                })
+                await asyncio.sleep(delay)
+
+        await browser.close()
+        self._page = None
+
+    # ── Indeed Platform Methods ─────────────────────────────────────────────
+
+    async def _dismiss_indeed_cookies(self, page=None):
+        """Handle Indeed cookie/consent banner."""
+        page = page or self._page
+        if not page:
+            return
+        try:
+            for sel in [
+                'button#onetrust-accept-btn-handler',
+                'button[aria-label="dismiss"]',
+                'button:has-text("Accept")',
+                'button:has-text("Alle akzeptieren")',
+                'button:has-text("Zustimmen")',
+                '#onetrust-accept-btn-handler',
+            ]:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(1)
+                    break
+        except:
+            pass
+
+    async def _login_indeed(self, page, cred) -> bool:
+        """Log into Indeed."""
+        await self.log("info", "apply", "login_start", {
+            "message": f"Logging into Indeed as {cred.email}...",
+        }, platform="indeed")
+
+        try:
+            await page.goto("https://secure.indeed.com/account/login?hl=de_DE", timeout=20000)
+            await asyncio.sleep(random.uniform(3, 5))
+            await self._dismiss_indeed_cookies(page)
+            await self.screenshot("indeed_login_01")
+
+            # Indeed login: email first, then password on next screen (or same page)
+            email_input = (
+                await page.query_selector('input[type="email"]') or
+                await page.query_selector('input[name="__email"]') or
+                await page.query_selector('input#ifl-InputFormField-3')
+            )
+            if email_input:
+                await email_input.click()
+                await asyncio.sleep(0.3)
+                await email_input.fill("")
+                await email_input.type(cred.email, delay=random.randint(30, 80))
+                await self.log("info", "apply", "login_email", {
+                    "message": f"  Entered email: {cred.email}",
+                }, platform="indeed")
+            else:
+                await self.log("warn", "apply", "login_no_email", {
+                    "message": "  No email input found on Indeed login",
+                }, platform="indeed")
+                await self.screenshot("indeed_login_err_no_email")
+                return False
+
+            # Click continue/next or press Enter
+            continue_btn = (
+                await page.query_selector('button[type="submit"]') or
+                await page.query_selector('button:has-text("Continue")') or
+                await page.query_selector('button:has-text("Weiter")')
+            )
+            if continue_btn and await continue_btn.is_visible():
+                await continue_btn.click()
+            else:
+                await email_input.press("Enter")
+
+            await asyncio.sleep(random.uniform(3, 5))
+            await self.screenshot("indeed_login_02_after_email")
+
+            # Now enter password (may be on same page or new page)
+            pw_input = (
+                await page.query_selector('input[type="password"]') or
+                await page.query_selector('input[name="__password"]')
+            )
+            if pw_input:
+                await pw_input.click()
+                await asyncio.sleep(0.3)
+                await pw_input.type(cred.password_encrypted, delay=random.randint(30, 80))
+                await self.log("info", "apply", "login_password", {
+                    "message": "  Entered password",
+                }, platform="indeed")
+
+                # Submit
+                submit_btn = (
+                    await page.query_selector('button[type="submit"]') or
+                    await page.query_selector('button:has-text("Sign in")') or
+                    await page.query_selector('button:has-text("Anmelden")')
+                )
+                if submit_btn and await submit_btn.is_visible():
+                    await submit_btn.click()
+                else:
+                    await pw_input.press("Enter")
+
+                await asyncio.sleep(random.uniform(4, 6))
+            else:
+                # Indeed sometimes uses magic link / phone verification — no password field
+                await self.log("warn", "apply", "login_no_password", {
+                    "message": "  No password field — Indeed may require verification",
+                }, platform="indeed")
+                await self.screenshot("indeed_login_no_password")
+                return False
+
+            await self._dismiss_indeed_cookies(page)
+            await self.screenshot("indeed_login_03_after")
+
+            # Check login success
+            current_url = page.url
+            if "login" not in current_url or "secure.indeed" not in current_url:
+                await self.log("info", "apply", "login_success", {
+                    "message": "  Indeed login successful!",
+                }, platform="indeed")
+                return True
+
+            # Check for error messages
+            try:
+                page_text = await page.inner_text("body")
+                if "captcha" in page_text.lower() or "verify" in page_text.lower():
+                    await self.log("warn", "apply", "login_captcha", {
+                        "message": "  CAPTCHA or verification required — cannot proceed",
+                    }, platform="indeed")
+                    return False
+            except:
+                pass
+
+            await self.log("warn", "apply", "login_failed", {
+                "message": "  Indeed login failed — still on login page",
+            }, platform="indeed")
+            return False
+
+        except Exception as e:
+            await self.log("error", "apply", "login_error", {
+                "message": f"  Indeed login error: {str(e)[:200]}",
+            }, platform="indeed")
+            return False
+
+    async def _scrape_phase_indeed(self, db: Session, job_filter: JobFilter, profile: dict) -> list[int]:
+        """Scrape Indeed for jobs. Returns list of all job IDs found."""
+        await self.log("info", "scrape", "phase_start", {"message": "Starting Indeed job discovery..."})
+        await self.emit_status("scraping")
+
+        queries = job_filter.job_titles if job_filter and job_filter.job_titles else ["kellner"]
+        locations = job_filter.locations if job_filter and job_filter.locations else ["berlin"]
+        requested_apps = int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10
+        max_pages = max(3, min((requested_apps * 2) // 15 + 1, 30))
+        all_job_ids = []
+        total_new = 0
+
+        pw = await async_playwright().start()
+
+        for query in queries:
+            for loc in locations:
+                if not self.running:
+                    break
+
+                q_enc = urllib.parse.quote(query)
+                l_enc = urllib.parse.quote(loc)
+
+                await self.log("info", "scrape", "search_start", {
+                    "message": f"Searching Indeed: {query} in {loc} (up to {max_pages} pages)",
+                    "query": query, "location": loc,
+                }, platform="indeed")
+
+                browser = await pw.chromium.launch(
+                    headless=True,
+                    args=['--disable-blink-features=AutomationControlled', '--disable-http2'],
+                )
+                ctx = await browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    locale="de-DE",
+                )
+                self._page = await ctx.new_page()
+                await self._page.add_init_script(STEALTH_JS)
+
+                new_for_query = 0
+                for page_num in range(1, max_pages + 1):
+                    if not self.running:
+                        break
+
+                    # Indeed pagination: start=0, 10, 20, ...
+                    url = f"https://de.indeed.com/jobs?q={q_enc}&l={l_enc}"
+                    if page_num > 1:
+                        url += f"&start={(page_num - 1) * 10}"
+
+                    try:
+                        await self._page.goto(url, timeout=20000, wait_until="domcontentloaded")
+                        await asyncio.sleep(random.uniform(3, 6))
+                        await self._dismiss_indeed_cookies()
+
+                        if page_num == 1:
+                            await self.screenshot("indeed_search_results")
+
+                        # Indeed job cards — multiple possible selectors
+                        cards = await self._page.query_selector_all(
+                            'div.job_seen_beacon, div.slider_container .slider_item, '
+                            'li[data-resultcount], div[data-jk], .resultContent, '
+                            'table.jobCard_mainContent, div.cardOutline'
+                        )
+                        # Fallback: try generic result containers
+                        if not cards:
+                            cards = await self._page.query_selector_all('#mosaic-provider-jobcards a.jcs-JobTitle')
+                            # If we got title links, use parent containers
+                            if cards:
+                                parent_cards = []
+                                for c in cards:
+                                    parent = await c.evaluate("el => el.closest('.job_seen_beacon, .cardOutline, [data-jk], li')")
+                                    if parent:
+                                        parent_el = await self._page.query_selector(f'[data-jk="{parent}"]') if isinstance(parent, str) else None
+                                        if parent_el:
+                                            parent_cards.append(parent_el)
+                                if parent_cards:
+                                    cards = parent_cards
+
+                        if not cards:
+                            await self.log("info", "scrape", "no_more_pages", {
+                                "message": f"  Indeed page {page_num}: no jobs — end of results",
+                            }, platform="indeed")
+                            break
+
+                        await self.log("info", "scrape", "jobs_found", {
+                            "message": f"  Indeed page {page_num}: {len(cards)} jobs",
+                            "count": len(cards), "page": page_num,
+                        }, platform="indeed")
+
+                        new_in_page = 0
+                        for card in cards:
+                            try:
+                                # Extract title — Indeed uses h2.jobTitle or a.jcs-JobTitle
+                                title_el = (
+                                    await card.query_selector('h2.jobTitle a, h2.jobTitle span, a.jcs-JobTitle, '
+                                                              'span[id^="jobTitle"], a[data-jk]')
+                                )
+                                title = (await title_el.inner_text()).strip() if title_el else ""
+
+                                # Extract URL — from title link or data-jk attribute
+                                href = ""
+                                if title_el:
+                                    href = await title_el.get_attribute("href") or ""
+                                if not href:
+                                    # Try data-jk on card itself
+                                    jk = await card.get_attribute("data-jk") or ""
+                                    if jk:
+                                        href = f"/viewjob?jk={jk}"
+                                    else:
+                                        # Find any link with /viewjob or /rc/clk
+                                        link = await card.query_selector('a[href*="viewjob"], a[href*="/rc/clk"]')
+                                        if link:
+                                            href = await link.get_attribute("href") or ""
+
+                                # Extract company
+                                company_el = (
+                                    await card.query_selector('[data-testid="company-name"], span.companyName, '
+                                                              'span.company, .companyInfo span')
+                                )
+                                company = (await company_el.inner_text()).strip() if company_el else ""
+
+                                # Extract location
+                                location_el = (
+                                    await card.query_selector('[data-testid="text-location"], div.companyLocation, '
+                                                              'div.company_location, span.companyLocation')
+                                )
+                                location_text = (await location_el.inner_text()).strip() if location_el else ""
+
+                                if not title or not href:
+                                    continue
+
+                                full_url = href if href.startswith("http") else f"https://de.indeed.com{href}"
+                                # Normalize URL — strip tracking params, keep jk
+                                if "jk=" in full_url:
+                                    import re as _re
+                                    jk_match = _re.search(r'jk=([a-f0-9]+)', full_url)
+                                    if jk_match:
+                                        full_url = f"https://de.indeed.com/viewjob?jk={jk_match.group(1)}"
+
+                                # Blacklist check
+                                if job_filter:
+                                    bl_companies = job_filter.blacklist_companies or []
+                                    bl_keywords = job_filter.blacklist_keywords or []
+                                    if any(bc.lower() in company.lower() for bc in bl_companies):
+                                        continue
+                                    if any(bk.lower() in title.lower() for bk in bl_keywords):
+                                        continue
+
+                                # Upsert
+                                existing = db.query(Job).filter(Job.url == full_url).first()
+                                if not existing:
+                                    new_job = Job(
+                                        platform="indeed", title=title[:200], company=company[:200],
+                                        location=location_text[:200], url=full_url,
+                                        scraped_at=datetime.now(timezone.utc),
+                                    )
+                                    db.add(new_job)
+                                    db.flush()
+                                    all_job_ids.append(new_job.id)
+                                    new_in_page += 1
+                                else:
+                                    all_job_ids.append(existing.id)
+                            except:
+                                continue
+
+                        db.commit()
+                        new_for_query += new_in_page
+                        total_new += new_in_page
+
+                        await self.log("info", "scrape", "page_complete", {
+                            "message": f"  Indeed page {page_num}: {new_in_page} new jobs stored",
+                            "new_jobs": new_in_page, "page": page_num,
+                        }, platform="indeed")
+
+                        if page_num < max_pages:
+                            await asyncio.sleep(random.uniform(5, 10))
+
+                    except Exception as e:
+                        await self.log("warn", "scrape", "page_failed", {
+                            "message": f"  Indeed page {page_num} failed: {str(e)[:80]}",
+                        }, platform="indeed")
+                        break
+
+                await self.log("info", "scrape", "query_complete", {
+                    "message": f"  Indeed {query} in {loc}: {new_for_query} new jobs",
+                }, platform="indeed")
+                await browser.close()
+                self._page = None
+                await asyncio.sleep(random.uniform(5, 8))
+
+        await pw.stop()
+
+        await self.log("info", "scrape", "phase_complete", {
+            "message": f"Indeed discovery complete: {total_new} new jobs ({len(all_job_ids)} total)",
+            "total_new": total_new,
+            "total_in_results": len(all_job_ids),
+        }, platform="indeed")
+
+        return all_job_ids
+
+    async def _apply_phase_indeed(self, db: Session, profile: dict, creds: list, job_filter: JobFilter, scraped_job_ids: list[int] = None):
+        """Apply to Indeed jobs."""
+        await self.log("info", "apply", "phase_start", {"message": "Starting Indeed application phase..."})
+        await self.emit_status("applying")
+
+        applied_urls = set(
+            r[0] for r in db.query(Application.url).filter(Application.user_id == self.user_id).all() if r[0]
+        )
+
+        if scraped_job_ids:
+            query = db.query(Job).filter(Job.id.in_(scraped_job_ids))
+        else:
+            query = db.query(Job).filter(Job.platform == "indeed")
+
+        if applied_urls:
+            query = query.filter(~Job.url.in_(applied_urls))
+
+        search_queries = job_filter.job_titles if job_filter and job_filter.job_titles else []
+        max_apps = min(max(int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10, 1), 500)
+        all_candidates = query.order_by(Job.scraped_at.desc()).limit(max_apps * 5).all()
+        if search_queries:
+            jobs = [j for j in all_candidates if _is_title_relevant(j.title, search_queries)][:max_apps]
+        else:
+            jobs = all_candidates[:max_apps]
+
+        self.stats["total"] = len(jobs)
+        await self.log("info", "apply", "jobs_queued", {
+            "message": f"Queued {len(jobs)} Indeed jobs for application (max: {max_apps})",
+            "count": len(jobs),
+        })
+        await self.emit_progress()
+
+        if not jobs:
+            await self.log("info", "apply", "no_jobs", {"message": "No unapplied Indeed jobs found"})
+            return
+
+        # Launch browser + login
+        pw = await async_playwright().start()
+        browser = await pw.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled', '--disable-http2'])
+        ctx = await browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale="de-DE",
+        )
+        self._page = await ctx.new_page()
+        await self._page.add_init_script(STEALTH_JS)
+
+        indeed_cred = next((c for c in creds if c.platform == "indeed" and c.is_active), None)
+        if not indeed_cred:
+            await self.log("error", "apply", "no_credentials", {
+                "message": "No Indeed credentials found — add them in Profile page.",
+            }, platform="indeed")
+            await browser.close()
+            await pw.stop()
+            return
+
+        logged_in = await self._login_indeed(self._page, indeed_cred)
+        if not logged_in:
+            await self.log("error", "apply", "login_required", {
+                "message": "INDEED LOGIN FAILED — Aborting apply phase.",
+            }, platform="indeed")
+            await browser.close()
+            await pw.stop()
+            return
+
+        for i, job in enumerate(jobs):
+            if not self.running:
+                break
+
+            await self.log("info", "apply", "job_start", {
+                "message": f"[{i+1}/{len(jobs)}] Opening: {job.title} at {job.company}",
+                "job_title": job.title, "company": job.company, "url": job.url,
+            }, job_id=job.id, platform="indeed")
+
+            application = Application(
+                user_id=self.user_id, job_id=job.id, platform="indeed",
+                job_title=job.title, company=job.company, url=job.url,
+                status="applying", applied_at=datetime.now(timezone.utc),
+            )
+            db.add(application)
+            db.commit()
+
+            try:
+                t0 = time.time()
+                await self._page.goto(job.url, timeout=30000, wait_until="domcontentloaded")
+                await asyncio.sleep(random.uniform(2, 4))
+                await self._dismiss_indeed_cookies()
+                await self.screenshot("indeed_job_page")
+
+                # Find apply button — Indeed uses "Jetzt bewerben" / "Apply now" / "Schnellbewerbung"
+                apply_btn = None
+                btn_text = ""
+                is_easy_apply = False
+
+                for sel in [
+                    'button#indeedApplyButton',
+                    'button[data-testid="indeedApplyButton"]',
+                    'button:has-text("Jetzt bewerben")',
+                    'button:has-text("Apply now")',
+                    'button:has-text("Schnellbewerbung")',
+                    'a:has-text("Jetzt bewerben")',
+                    'a:has-text("Apply now")',
+                    'a[data-testid="apply-button"]',
+                    '#applyButtonLinkContainer a',
+                ]:
+                    apply_btn = await self._page.query_selector(sel)
+                    if apply_btn and await apply_btn.is_visible():
+                        try:
+                            btn_text = (await apply_btn.inner_text()).strip()
+                        except:
+                            btn_text = sel
+                        # Check if it's Indeed Easy Apply (not external)
+                        btn_id = await apply_btn.get_attribute("id") or ""
+                        btn_class = await apply_btn.get_attribute("class") or ""
+                        if "indeedApply" in btn_id or "indeedApply" in btn_class:
+                            is_easy_apply = True
+                        break
+                    apply_btn = None
+
+                if not apply_btn:
+                    # Scroll down and retry
+                    await self._page.evaluate("window.scrollBy(0, 400)")
+                    await asyncio.sleep(2)
+                    for sel in ['button#indeedApplyButton', 'button:has-text("Jetzt bewerben")', 'button:has-text("Apply now")']:
+                        apply_btn = await self._page.query_selector(sel)
+                        if apply_btn and await apply_btn.is_visible():
+                            btn_text = (await apply_btn.inner_text()).strip()
+                            break
+                        apply_btn = None
+
+                if not apply_btn:
+                    all_btns = await self._page.query_selector_all("button:visible, a:visible")
+                    btn_texts = []
+                    for b in all_btns[:15]:
+                        try:
+                            t = (await b.inner_text()).strip()
+                            if t and len(t) < 60:
+                                btn_texts.append(t)
+                        except:
+                            pass
+                    await self.log("warn", "apply", "no_button", {
+                        "message": f"  No Indeed apply button found. Buttons: {btn_texts[:8]}",
+                    }, job_id=job.id, platform="indeed")
+                    application.status = "skipped"
+                    application.error_log = "No apply button found"
+                    db.commit()
+                    self.stats["skipped"] += 1
+                    await self.emit_progress()
+                    continue
+
+                await self.log("info", "apply", "clicking_apply", {
+                    "message": f"  Clicking \"{btn_text}\"... {'(Easy Apply)' if is_easy_apply else '(may redirect)'}",
+                }, job_id=job.id, platform="indeed")
+
+                # Click apply — may open new tab, modal, or redirect externally
+                old_url = self._page.url
+                old_pages = ctx.pages[:]
+                await apply_btn.click()
+                await asyncio.sleep(random.uniform(3, 5))
+
+                # Check if new tab opened
+                new_pages = [p for p in ctx.pages if p not in old_pages]
+                target_page = new_pages[0] if new_pages else self._page
+                if new_pages:
+                    await self.log("info", "apply", "new_tab", {
+                        "message": "  Application opened in new tab",
+                    }, job_id=job.id, platform="indeed")
+                    try:
+                        await target_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except:
+                        pass
+                    await asyncio.sleep(2)
+
+                await self.screenshot("indeed_after_apply_click")
+
+                # Detect external redirect — if we left indeed.com, skip
+                target_url = target_page.url.lower()
+                if "indeed.com" not in target_url and "indeed.com" not in self._page.url.lower():
+                    await self.log("warn", "apply", "external_redirect", {
+                        "message": f"  External redirect to {target_url[:80]} — skipping",
+                    }, job_id=job.id, platform="indeed")
+                    application.status = "skipped"
+                    application.error_log = f"External apply: {target_url[:200]}"
+                    db.commit()
+                    self.stats["skipped"] += 1
+                    await self.emit_progress()
+                    if new_pages and not new_pages[0].is_closed():
+                        await new_pages[0].close()
+                    continue
+
+                # Check for instant success
+                page_text = (await target_page.inner_text("body")).lower()
+                if any(kw in page_text for kw in [
+                    "your application has been submitted", "ihre bewerbung wurde gesendet",
+                    "bewerbung abgeschickt", "application sent", "erfolgreich beworben",
+                ]):
+                    application.status = "success"
+                    self.stats["applied"] += 1
+                    await self.log("info", "apply", "success", {
+                        "message": f"  SUCCESS — Indeed application sent! ({time.time()-t0:.0f}s)",
+                    }, job_id=job.id, platform="indeed")
+                    db.commit()
+                    await self.emit_progress()
+                    if new_pages and not new_pages[0].is_closed():
+                        await new_pages[0].close()
+                    if i < len(jobs) - 1 and self.running:
+                        await asyncio.sleep(random.uniform(15, 25))
+                    continue
+
+                # Multi-step Indeed Easy Apply form
+                form_success = False
+                prev_page_signature = ""
+                stuck_count = 0
+
+                for step in range(15):
+                    # Check external redirect mid-form
+                    try:
+                        step_url = target_page.url.lower()
+                        if "indeed.com" not in step_url:
+                            await self.log("warn", "apply", "external_redirect", {
+                                "message": f"  Left Indeed (now on {step_url[:80]}) — stopping",
+                            }, job_id=job.id, platform="indeed")
+                            break
+                    except:
+                        pass
+
+                    # Stuck detection
+                    try:
+                        cur_url = target_page.url
+                        cur_inputs = await target_page.evaluate("""() => {
+                            const inputs = document.querySelectorAll('input:not([type=hidden]), select, textarea');
+                            return Array.from(inputs).map(e => e.name || e.id || e.type).join(',');
+                        }""")
+                        page_signature = f"{cur_url}|{cur_inputs}"
+                    except:
+                        page_signature = ""
+
+                    if page_signature and page_signature == prev_page_signature:
+                        stuck_count += 1
+                        if stuck_count >= 2:
+                            await self.log("warn", "apply", "form_stuck", {
+                                "message": f"  Form stuck — same page after {stuck_count} attempts",
+                            }, job_id=job.id, platform="indeed")
+                            # Log validation errors
+                            try:
+                                err_els = await target_page.query_selector_all('[class*="error"], [class*="Error"], [role="alert"]')
+                                for err_el in err_els[:3]:
+                                    err_text = (await err_el.inner_text()).strip()
+                                    if err_text:
+                                        await self.log("warn", "apply", "validation_error", {
+                                            "message": f"  Validation: {err_text[:100]}",
+                                        }, job_id=job.id, platform="indeed")
+                            except:
+                                pass
+                            break
+                    else:
+                        stuck_count = 0
+                    prev_page_signature = page_signature
+
+                    # Fill form fields
+                    original_page = self._page
+                    self._page = target_page
+                    form_result = await self._match_and_fill_form(
+                        profile, job_id=job.id, platform="indeed",
+                        job_title=job.title, company=job.company,
+                    )
+                    self._page = original_page
+
+                    # Click continue/submit/next
+                    clicked = False
+                    for sel in [
+                        'button[data-testid="submit-button"]',
+                        'button:has-text("Bewerbung abschicken")',
+                        'button:has-text("Submit your application")',
+                        'button:has-text("Submit")',
+                        'button:has-text("Apply")',
+                        'button:has-text("Absenden")',
+                        'button:has-text("Continue")',
+                        'button:has-text("Weiter")',
+                        'button:has-text("Next")',
+                        'button[type="submit"]',
+                        'a:has-text("Continue")',
+                    ]:
+                        btn = await target_page.query_selector(sel)
+                        if btn and await btn.is_visible():
+                            try:
+                                step_text = (await btn.inner_text()).strip()
+                                await self.log("info", "apply", "form_step", {
+                                    "message": f"  Step {step+1}: clicking \"{step_text}\"",
+                                }, job_id=job.id, platform="indeed")
+                                await btn.click()
+                                await asyncio.sleep(random.uniform(2, 4))
+                                clicked = True
+                                break
+                            except:
+                                continue
+
+                    if not clicked:
+                        await self.log("info", "apply", "form_no_button", {
+                            "message": f"  No more buttons at step {step+1}",
+                        }, job_id=job.id, platform="indeed")
+                        break
+
+                    # Check validation errors
+                    try:
+                        err_els = await target_page.query_selector_all('[class*="error"], [class*="Error"], [role="alert"]')
+                        for err_el in err_els[:3]:
+                            err_text = (await err_el.inner_text()).strip()
+                            if err_text and len(err_text) < 200:
+                                await self.log("warn", "apply", "validation_error", {
+                                    "message": f"  Validation: {err_text[:100]}",
+                                }, job_id=job.id, platform="indeed")
+                    except:
+                        pass
+
+                    # Check success
+                    try:
+                        page_text = (await target_page.inner_text("body")).lower()
+                    except:
+                        form_success = True
+                        break
+
+                    if any(kw in page_text for kw in [
+                        "your application has been submitted", "ihre bewerbung wurde gesendet",
+                        "bewerbung abgeschickt", "application sent", "erfolgreich beworben",
+                        "we have received your application", "vielen dank für ihre bewerbung",
+                        "thank you for your application",
+                    ]):
+                        form_success = True
+                        break
+
+                if form_success:
+                    application.status = "success"
+                    self.stats["applied"] += 1
+                    await self.log("info", "apply", "success", {
+                        "message": f"  SUCCESS — Indeed application submitted ({time.time()-t0:.0f}s)",
+                    }, job_id=job.id, platform="indeed")
+                else:
+                    # Final check
+                    try:
+                        final_text = (await target_page.inner_text("body")).lower()
+                        if any(kw in final_text for kw in [
+                            "your application has been submitted", "bewerbung abgeschickt",
+                            "erfolgreich beworben", "application sent",
+                        ]):
+                            application.status = "success"
+                            self.stats["applied"] += 1
+                            await self.log("info", "apply", "success", {
+                                "message": f"  SUCCESS (delayed) — Indeed application submitted",
+                            }, job_id=job.id, platform="indeed")
+                        else:
+                            application.status = "failed"
+                            application.error_log = "Could not complete Indeed application form"
+                            self.stats["failed"] += 1
+                            await self.log("warn", "apply", "form_incomplete", {
+                                "message": f"  Could not complete application form",
+                            }, job_id=job.id, platform="indeed")
+                    except:
+                        application.status = "failed"
+                        application.error_log = "Could not complete Indeed application form"
+                        self.stats["failed"] += 1
+
+                await self.screenshot("indeed_after_submit")
+                db.commit()
+                await self.emit_progress()
+
+                if new_pages and not new_pages[0].is_closed():
+                    await new_pages[0].close()
+
+            except Exception as e:
+                application.status = "failed"
+                application.error_log = str(e)[:500]
+                db.commit()
+                self.stats["failed"] += 1
+                await self.log("error", "apply", "error", {
+                    "message": f"  ERROR: {str(e)[:100]}",
+                }, job_id=job.id, platform="indeed")
                 await self.emit_progress()
 
             if i < len(jobs) - 1 and self.running:
