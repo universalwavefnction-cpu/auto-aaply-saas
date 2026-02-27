@@ -122,20 +122,6 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          <div className="w-32">
-            <label className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] block mb-2">Applications</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={1}
-                max={50}
-                value={maxApps}
-                onChange={e => setMaxApps(Number(e.target.value))}
-                className="flex-1 accent-amber-500 h-1"
-              />
-              <span className="text-amber-500 font-black text-lg w-8 text-right tabular-nums">{maxApps}</span>
-            </div>
-          </div>
           <div className="flex items-end">
             <button
               onClick={launch}
@@ -145,6 +131,19 @@ export default function Dashboard() {
               {launching ? 'Launching...' : 'Go →'}
             </button>
           </div>
+        </div>
+        {/* Applications slider — own row */}
+        <div className="flex items-center gap-4 mt-4 pt-4 border-t border-white/5">
+          <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">How many applications?</span>
+          <input
+            type="range"
+            min={1}
+            max={500}
+            value={maxApps}
+            onChange={e => setMaxApps(Number(e.target.value))}
+            className="w-64 accent-amber-500 h-1.5"
+          />
+          <span className="text-amber-500 font-black text-2xl w-10 text-center tabular-nums">{maxApps}</span>
         </div>
         <p className="text-[10px] text-white/15 mt-3">Type a job title, pick a city, hit Go — the bot scrapes jobs and auto-applies for you.</p>
       </div>

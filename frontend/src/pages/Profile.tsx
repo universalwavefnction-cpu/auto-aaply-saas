@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 
+function Field({ label, value, onChange, className = '' }: { label: string; value: string; onChange: (v: string) => void; className?: string }) {
+  return (
+    <div className={className}>
+      <label className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-2">{label}</label>
+      <input type="text" value={value} onChange={e => onChange(e.target.value)}
+        className="w-full px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500/30 transition-colors" />
+    </div>
+  )
+}
+
 export default function Profile() {
   const [profile, setProfile] = useState<any>({})
   const [credentials, setCredentials] = useState<any[]>([])
@@ -37,14 +47,6 @@ export default function Profile() {
     setQuestions(rest)
   }
 
-  const Field = ({ label, value, onChange, className = '' }: { label: string; value: string; onChange: (v: string) => void; className?: string }) => (
-    <div className={className}>
-      <label className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-2">{label}</label>
-      <input type="text" value={value} onChange={e => onChange(e.target.value)}
-        className="w-full px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500/30 transition-colors" />
-    </div>
-  )
-
   return (
     <div className="p-8 max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
@@ -66,18 +68,18 @@ export default function Profile() {
       <div className="bg-[#0A0A0A] border border-white/5 rounded-xl p-6">
         <span className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-4">Personal Data</span>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="First Name" value={profile.first_name || ''} onChange={v => setProfile({ ...profile, first_name: v })} />
-          <Field label="Last Name" value={profile.last_name || ''} onChange={v => setProfile({ ...profile, last_name: v })} />
-          <Field label="Phone" value={profile.phone || ''} onChange={v => setProfile({ ...profile, phone: v })} />
-          <Field label="City" value={profile.city || ''} onChange={v => setProfile({ ...profile, city: v })} />
-          <Field label="ZIP" value={profile.zip_code || ''} onChange={v => setProfile({ ...profile, zip_code: v })} />
-          <Field label="Street" value={profile.street_address || ''} onChange={v => setProfile({ ...profile, street_address: v })} />
-          <Field label="Salary" value={String(profile.salary_expectation || '')} onChange={v => setProfile({ ...profile, salary_expectation: parseInt(v) || 0 })} />
-          <Field label="Experience (yrs)" value={String(profile.years_experience || '')} onChange={v => setProfile({ ...profile, years_experience: parseInt(v) || 0 })} />
+          <Field label="First Name" value={profile.first_name || ''} onChange={v => setProfile((p: any) => ({ ...p, first_name: v }))} />
+          <Field label="Last Name" value={profile.last_name || ''} onChange={v => setProfile((p: any) => ({ ...p, last_name: v }))} />
+          <Field label="Phone" value={profile.phone || ''} onChange={v => setProfile((p: any) => ({ ...p, phone: v }))} />
+          <Field label="City" value={profile.city || ''} onChange={v => setProfile((p: any) => ({ ...p, city: v }))} />
+          <Field label="ZIP" value={profile.zip_code || ''} onChange={v => setProfile((p: any) => ({ ...p, zip_code: v }))} />
+          <Field label="Street" value={profile.street_address || ''} onChange={v => setProfile((p: any) => ({ ...p, street_address: v }))} />
+          <Field label="Salary" value={String(profile.salary_expectation || '')} onChange={v => setProfile((p: any) => ({ ...p, salary_expectation: parseInt(v) || 0 }))} />
+          <Field label="Experience (yrs)" value={String(profile.years_experience || '')} onChange={v => setProfile((p: any) => ({ ...p, years_experience: parseInt(v) || 0 }))} />
         </div>
         <div className="mt-4">
           <label className="text-[8px] font-black text-white/15 uppercase tracking-[0.2em] block mb-2">Summary</label>
-          <textarea value={profile.summary || ''} onChange={e => setProfile({ ...profile, summary: e.target.value })} rows={3}
+          <textarea value={profile.summary || ''} onChange={e => { const v = e.target.value; setProfile((p: any) => ({ ...p, summary: v })) }} rows={3}
             className="w-full px-4 py-2.5 bg-black border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500/30" />
         </div>
       </div>

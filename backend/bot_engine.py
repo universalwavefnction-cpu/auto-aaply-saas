@@ -31,7 +31,7 @@ def _normalize_german(text: str) -> str:
     return text
 
 
-def _is_title_relevant(job_title: str, search_queries: list[str], threshold: int = 75) -> bool:
+def _is_title_relevant(job_title: str, search_queries: list[str], threshold: int = 60) -> bool:
     """Check if a job title is relevant to any of the search queries.
     Handles German plurals (Servicekraft/Servicekräfte), umlauts, hyphens.
     'Servicekräfte (m/w/d)' matches 'Servicekraft'."""
@@ -703,13 +703,15 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             self.running = False
 
     async def _scrape_phase(self, db: Session, job_filter: JobFilter, profile: dict) -> list[int]:
-        """Scrape StepStone for new jobs — paginates up to 5 pages. Returns list of all job IDs found."""
+        """Scrape StepStone for new jobs — paginates dynamically based on max_applications. Returns list of all job IDs found."""
         await self.log("info", "scrape", "phase_start", {"message": "Starting job discovery..."})
         await self.emit_status("scraping")
 
         queries = job_filter.job_titles if job_filter and job_filter.job_titles else ["project-manager"]
         locations = job_filter.locations if job_filter and job_filter.locations else ["berlin"]
-        max_pages = 5
+        # Scale pages based on requested applications (25 jobs/page, ~50% pass filter)
+        requested_apps = int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10
+        max_pages = max(5, min((requested_apps * 3) // 25 + 1, 40))  # 5-40 pages
         all_job_ids = []  # Track ALL job IDs found in this scrape (new + existing)
 
         pw = await async_playwright().start()
@@ -1124,10 +1126,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
         # Get search queries for title relevance filtering
         search_queries = job_filter.job_titles if job_filter and job_filter.job_titles else []
-        max_apps = min(max(int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10, 1), 50)
+        max_apps = min(max(int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10, 1), 500)
 
         # Fetch more candidates than needed, then filter for relevance
-        all_candidates = query.order_by(Job.scraped_at.desc()).limit(max_apps * 10).all()
+        all_candidates = query.order_by(Job.scraped_at.desc()).limit(max_apps * 5).all()
         if search_queries:
             jobs = [j for j in all_candidates if _is_title_relevant(j.title, search_queries)][:max_apps]
             skipped_count = len(all_candidates) - len([j for j in all_candidates if _is_title_relevant(j.title, search_queries)])
@@ -1882,7 +1884,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
         queries = job_filter.job_titles if job_filter and job_filter.job_titles else ["Servicekraft"]
         locations = job_filter.locations if job_filter and job_filter.locations else ["Berlin"]
-        max_pages = 5
+        requested_apps = int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10
+        max_pages = max(5, min((requested_apps * 3) // 25 + 1, 40))  # 5-40 pages
         all_job_ids = []
 
         pw = await async_playwright().start()
@@ -2074,8 +2077,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
         # Title relevance filtering
         search_queries = job_filter.job_titles if job_filter and job_filter.job_titles else []
-        max_apps = min(max(int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10, 1), 50)
-        all_candidates = query.order_by(Job.scraped_at.desc()).limit(max_apps * 10).all()
+        max_apps = min(max(int(job_filter.max_applications or 10) if job_filter and hasattr(job_filter, 'max_applications') else 10, 1), 500)
+        all_candidates = query.order_by(Job.scraped_at.desc()).limit(max_apps * 5).all()
         if search_queries:
             jobs = [j for j in all_candidates if _is_title_relevant(j.title, search_queries)][:max_apps]
         else:
@@ -2145,21 +2148,24 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 await self._dismiss_xing_cookies()
                 await self.screenshot("xing_job_page")
 
-                # Find apply button
+                # Find apply button — "Easy apply" is the most common on Xing
                 apply_btn = None
                 btn_text = ""
                 for sel in [
+                    'button:has-text("Easy apply")',
+                    'button:has-text("Jetzt bewerben")',
+                    'button:has-text("Bewerben")',
+                    'button:has-text("Apply now")',
+                    'button:has-text("Apply")',
+                    'a:has-text("Easy apply")',
+                    'a:has-text("Jetzt bewerben")',
+                    'a:has-text("Bewerben")',
+                    'a:has-text("Apply now")',
                     'a[data-testid="apply-button-inner"]',
                     'button[data-testid="apply-button-inner"]',
                     '[data-testid="apply-button"]',
                     'a[href*="/apply"]',
                     'a[href*="bewerben"]',
-                    'button:has-text("Jetzt bewerben")',
-                    'button:has-text("Bewerben")',
-                    'a:has-text("Jetzt bewerben")',
-                    'a:has-text("Bewerben")',
-                    'button:has-text("Apply")',
-                    'a:has-text("Apply")',
                 ]:
                     apply_btn = await self._page.query_selector(sel)
                     if apply_btn and await apply_btn.is_visible():
@@ -2233,7 +2239,42 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
                 # Multi-step form: loop through Next/Submit buttons
                 form_success = False
+                prev_page_signature = ""
+                stuck_count = 0
                 for step in range(10):
+                    # Capture page signature to detect stuck loops
+                    try:
+                        cur_url = target_page.url
+                        cur_inputs = await target_page.evaluate("""() => {
+                            const inputs = document.querySelectorAll('input:not([type=hidden]), select, textarea');
+                            return Array.from(inputs).map(e => e.name || e.id || e.type).join(',');
+                        }""")
+                        page_signature = f"{cur_url}|{cur_inputs}"
+                    except:
+                        page_signature = ""
+
+                    if page_signature and page_signature == prev_page_signature:
+                        stuck_count += 1
+                        if stuck_count >= 2:
+                            await self.log("warn", "apply", "form_stuck", {
+                                "message": f"  Form stuck — same page after {stuck_count} attempts, giving up",
+                            }, job_id=job.id, platform="xing")
+                            # Check for validation errors before breaking
+                            try:
+                                err_els = await target_page.query_selector_all('[class*="error"], [class*="Error"], [role="alert"], .field-error, .validation-error')
+                                for err_el in err_els[:3]:
+                                    err_text = (await err_el.inner_text()).strip()
+                                    if err_text:
+                                        await self.log("warn", "apply", "validation_error", {
+                                            "message": f"  Validation error: {err_text[:100]}",
+                                        }, job_id=job.id, platform="xing")
+                            except:
+                                pass
+                            break
+                    else:
+                        stuck_count = 0
+                    prev_page_signature = page_signature
+
                     # Try to fill form fields if any
                     original_page = self._page
                     self._page = target_page
@@ -2277,9 +2318,45 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         }, job_id=job.id, platform="xing")
                         break
 
+                    # Check for validation errors after clicking (form didn't advance)
+                    try:
+                        err_els = await target_page.query_selector_all('[class*="error"], [class*="Error"], [role="alert"], .field-error, .validation-error')
+                        for err_el in err_els[:3]:
+                            err_text = (await err_el.inner_text()).strip()
+                            if err_text and len(err_text) < 200:
+                                await self.log("warn", "apply", "validation_error", {
+                                    "message": f"  Validation: {err_text[:100]}",
+                                }, job_id=job.id, platform="xing")
+                    except:
+                        pass
+
                     # Check success after each step
-                    page_text = (await target_page.inner_text("body")).lower()
-                    if any(kw in page_text for kw in ["bewerbung wurde gesendet", "application sent", "vielen dank", "thank you", "success"]):
+                    try:
+                        page_text = (await target_page.inner_text("body")).lower()
+                    except:
+                        # Page might have closed/navigated — could be success
+                        form_success = True
+                        break
+                    success_keywords = [
+                        "bewerbung wurde gesendet", "application sent",
+                        "vielen dank", "thank you", "success",
+                        "bewerbung abgeschickt", "application submitted",
+                        "erfolgreich gesendet", "successfully sent",
+                        "we have received", "wir haben ihre bewerbung",
+                    ]
+                    if any(kw in page_text for kw in success_keywords):
+                        form_success = True
+                        break
+
+                    # Also check if "Send application" button disappeared (= submitted)
+                    send_btn_gone = True
+                    for check_sel in ['button:has-text("Send application")', 'button:has-text("Bewerbung absenden")', 'button:has-text("Easy apply")']:
+                        check_btn = await target_page.query_selector(check_sel)
+                        if check_btn and await check_btn.is_visible():
+                            send_btn_gone = False
+                            break
+                    # If we clicked "Send application" and it's gone, that's likely success
+                    if send_btn_gone and "send" in step_text.lower() or "absenden" in step_text.lower():
                         form_success = True
                         break
 
@@ -2290,12 +2367,29 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         "message": f"  SUCCESS — Xing application submitted ({time.time()-t0:.0f}s)",
                     }, job_id=job.id, platform="xing")
                 else:
-                    application.status = "failed"
-                    application.error_log = "Could not complete Xing application form"
-                    self.stats["failed"] += 1
-                    await self.log("warn", "apply", "form_incomplete", {
-                        "message": f"  Could not complete application form",
-                    }, job_id=job.id, platform="xing")
+                    # One more check: maybe success page loaded after the loop
+                    try:
+                        final_text = (await target_page.inner_text("body")).lower()
+                        if any(kw in final_text for kw in ["application sent", "bewerbung", "thank you", "vielen dank"]):
+                            application.status = "success"
+                            self.stats["applied"] += 1
+                            await self.log("info", "apply", "success", {
+                                "message": f"  SUCCESS (delayed detection) — Xing application submitted",
+                            }, job_id=job.id, platform="xing")
+                        else:
+                            application.status = "failed"
+                            application.error_log = "Could not complete Xing application form"
+                            self.stats["failed"] += 1
+                            await self.log("warn", "apply", "form_incomplete", {
+                                "message": f"  Could not complete application form",
+                            }, job_id=job.id, platform="xing")
+                    except:
+                        application.status = "failed"
+                        application.error_log = "Could not complete Xing application form"
+                        self.stats["failed"] += 1
+                        await self.log("warn", "apply", "form_incomplete", {
+                            "message": f"  Could not complete application form",
+                        }, job_id=job.id, platform="xing")
 
                 await self.screenshot("xing_after_submit")
                 db.commit()
