@@ -15,7 +15,7 @@ from thefuzz import fuzz
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal
-from .models import BotLog, Job, Application, Profile, PlatformCredential, JobFilter
+from .models import BotLog, Job, Application, Profile, PlatformCredential, JobFilter, CVFile
 from .config import settings
 
 SCREENSHOT_DIR = Path("/tmp/bot_screenshots")
@@ -567,6 +567,25 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     "error": str(e),
                 }, job_id=job_id, platform=platform)
 
+        # Upload CV to any file inputs
+        cv_path = profile.get("cv_path")
+        if cv_path and os.path.exists(cv_path):
+            try:
+                file_inputs = await self._page.query_selector_all('input[type="file"]')
+                for fi in file_inputs:
+                    try:
+                        await fi.set_input_files(cv_path)
+                        filled += 1
+                        await self.log("info", "form", "cv_uploaded", {
+                            "message": f"  Uploaded CV: {os.path.basename(cv_path)}",
+                        }, job_id=job_id, platform=platform)
+                    except Exception as e:
+                        await self.log("warn", "form", "cv_upload_error", {
+                            "message": f"  CV upload failed: {e}",
+                        }, job_id=job_id, platform=platform)
+            except:
+                pass
+
         # Log form summary
         await self.log("info", "form", "form_summary", {
             "message": f"Form: {filled} filled, {skipped} skipped, {len(unmatched)} unmatched",
@@ -642,10 +661,33 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             self.running = False
             return
 
+        # Load selected CV path
+        cv_path = None
+        if job_filter and hasattr(job_filter, 'selected_cv_id') and job_filter.selected_cv_id:
+            cv_file = db.query(CVFile).filter(CVFile.id == job_filter.selected_cv_id).first()
+            if cv_file and cv_file.file_path and os.path.exists(cv_file.file_path):
+                cv_path = cv_file.file_path
+                await self.log("info", "system", "cv_selected", {
+                    "message": f"Using CV: {cv_file.label} ({os.path.basename(cv_file.file_path)})",
+                })
+
+        # Normalize phone — Xing requires +49 format, not "155 610 577 65"
+        raw_phone = profile_row.phone or ""
+        phone = raw_phone.strip()
+        if phone and not phone.startswith("+"):
+            # Remove spaces/dashes for formatting
+            digits = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            if digits.startswith("0"):
+                phone = "+49" + digits[1:]  # 0155... → +49155...
+            elif digits.startswith("49"):
+                phone = "+" + digits
+            else:
+                phone = "+49" + digits  # bare number like 155... → +49155...
+
         profile = {
             "first_name": profile_row.first_name,
             "last_name": profile_row.last_name,
-            "phone": profile_row.phone,
+            "phone": phone,
             "city": profile_row.city,
             "zip_code": profile_row.zip_code,
             "street_address": profile_row.street_address,
@@ -656,6 +698,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 PlatformCredential.user_id == self.user_id
             ).first().email if creds else "",
             "questions_json": profile_row.questions_json or {},
+            "cv_path": cv_path,
         }
 
         # Determine which platform to use
@@ -2148,16 +2191,51 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 await self._dismiss_xing_cookies()
                 await self.screenshot("xing_job_page")
 
-                # Find apply button — "Easy apply" is the most common on Xing
+                # Find apply button — prioritize "Easy apply" (Xing's native apply)
+                # First check if this is an external-only job (no Easy Apply available)
+                external_only = False
+                try:
+                    all_link_texts = await self._page.evaluate("""() => {
+                        return Array.from(document.querySelectorAll('a, button')).map(e => ({
+                            text: (e.innerText || '').trim().toLowerCase(),
+                            href: (e.href || '').toLowerCase()
+                        }));
+                    }""")
+                    has_external = any(
+                        "arbeitgeberseite" in l["text"] or "employer website" in l["text"] or "visit employer" in l["text"]
+                        for l in all_link_texts
+                    )
+                    has_easy_apply = any(
+                        "easy apply" in l["text"] or "schnellbewerbung" in l["text"]
+                        for l in all_link_texts
+                    )
+                    if has_external and not has_easy_apply:
+                        external_only = True
+                except:
+                    pass
+
+                if external_only:
+                    await self.log("info", "apply", "external_only", {
+                        "message": f"  External-only job (no Easy Apply) — skipping",
+                    }, job_id=job.id, platform="xing")
+                    application.status = "skipped"
+                    application.error_log = "External apply only — no Xing Easy Apply"
+                    db.commit()
+                    self.stats["skipped"] += 1
+                    await self.emit_progress()
+                    continue
+
                 apply_btn = None
                 btn_text = ""
-                for sel in [
+                apply_selectors = [
                     'button:has-text("Easy apply")',
+                    'button:has-text("Schnellbewerbung")',
                     'button:has-text("Jetzt bewerben")',
                     'button:has-text("Bewerben")',
                     'button:has-text("Apply now")',
                     'button:has-text("Apply")',
                     'a:has-text("Easy apply")',
+                    'a:has-text("Schnellbewerbung")',
                     'a:has-text("Jetzt bewerben")',
                     'a:has-text("Bewerben")',
                     'a:has-text("Apply now")',
@@ -2166,15 +2244,25 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     '[data-testid="apply-button"]',
                     'a[href*="/apply"]',
                     'a[href*="bewerben"]',
-                ]:
-                    apply_btn = await self._page.query_selector(sel)
-                    if apply_btn and await apply_btn.is_visible():
-                        try:
-                            btn_text = (await apply_btn.inner_text()).strip()
-                        except:
-                            btn_text = sel
+                ]
+
+                # Try twice — first pass, then wait 3s for lazy-loaded buttons
+                for attempt in range(2):
+                    for sel in apply_selectors:
+                        apply_btn = await self._page.query_selector(sel)
+                        if apply_btn and await apply_btn.is_visible():
+                            try:
+                                btn_text = (await apply_btn.inner_text()).strip()
+                            except:
+                                btn_text = sel
+                            break
+                        apply_btn = None
+                    if apply_btn:
                         break
-                    apply_btn = None
+                    if attempt == 0:
+                        # Scroll down and wait for lazy content
+                        await self._page.evaluate("window.scrollBy(0, 400)")
+                        await asyncio.sleep(3)
 
                 if not apply_btn:
                     all_btns = await self._page.query_selector_all("button:visible, a:visible")
@@ -2221,9 +2309,26 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
                 await self.screenshot("xing_after_apply_click")
 
-                # Check for success already
+                # Detect external redirect — if we left xing.com, skip this job
+                target_url = target_page.url.lower()
+                if "xing.com" not in target_url and "xing.com" not in self._page.url.lower():
+                    await self.log("warn", "apply", "external_redirect", {
+                        "message": f"  External redirect to {target_url[:80]} — skipping (not a Xing Easy Apply)",
+                    }, job_id=job.id, platform="xing")
+                    application.status = "skipped"
+                    application.error_log = f"External apply: {target_url[:200]}"
+                    db.commit()
+                    self.stats["skipped"] += 1
+                    await self.emit_progress()
+                    if new_pages and not new_pages[0].is_closed():
+                        await new_pages[0].close()
+                    if i < len(jobs) - 1 and self.running:
+                        await asyncio.sleep(random.uniform(10, 15))
+                    continue
+
+                # Check for success already (instant "Easy apply" — no form)
                 page_text = (await target_page.inner_text("body")).lower()
-                if any(kw in page_text for kw in ["bewerbung wurde gesendet", "application sent", "vielen dank", "thank you"]):
+                if any(kw in page_text for kw in ["bewerbung wurde gesendet", "application sent", "erfolgreich gesendet", "bewerbung abgeschickt"]):
                     application.status = "success"
                     self.stats["applied"] += 1
                     await self.log("info", "apply", "success", {
@@ -2242,6 +2347,17 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 prev_page_signature = ""
                 stuck_count = 0
                 for step in range(10):
+                    # Check if we've been redirected to an external site (not xing.com)
+                    try:
+                        step_url = target_page.url.lower()
+                        if "xing.com" not in step_url:
+                            await self.log("warn", "apply", "external_redirect", {
+                                "message": f"  Left Xing (now on {step_url[:80]}) — stopping form loop",
+                            }, job_id=job.id, platform="xing")
+                            break
+                    except:
+                        pass
+
                     # Capture page signature to detect stuck loops
                     try:
                         cur_url = target_page.url
@@ -2338,11 +2454,11 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         form_success = True
                         break
                     success_keywords = [
-                        "bewerbung wurde gesendet", "application sent",
-                        "vielen dank", "thank you", "success",
-                        "bewerbung abgeschickt", "application submitted",
-                        "erfolgreich gesendet", "successfully sent",
-                        "we have received", "wir haben ihre bewerbung",
+                        "bewerbung wurde gesendet", "bewerbung abgeschickt",
+                        "erfolgreich gesendet", "application sent", "application submitted",
+                        "successfully sent", "we have received your application",
+                        "wir haben ihre bewerbung erhalten",
+                        "vielen dank für ihre bewerbung", "thank you for your application",
                     ]
                     if any(kw in page_text for kw in success_keywords):
                         form_success = True
@@ -2368,9 +2484,14 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     }, job_id=job.id, platform="xing")
                 else:
                     # One more check: maybe success page loaded after the loop
+                    # NOTE: Only match SPECIFIC success phrases — "bewerbung" alone matches every Xing page
                     try:
                         final_text = (await target_page.inner_text("body")).lower()
-                        if any(kw in final_text for kw in ["application sent", "bewerbung", "thank you", "vielen dank"]):
+                        if any(kw in final_text for kw in [
+                            "bewerbung wurde gesendet", "bewerbung abgeschickt",
+                            "erfolgreich gesendet", "application sent", "application submitted",
+                            "we have received your application", "wir haben ihre bewerbung erhalten",
+                        ]):
                             application.status = "success"
                             self.stats["applied"] += 1
                             await self.log("info", "apply", "success", {
