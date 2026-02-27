@@ -8,12 +8,14 @@ export default function Applications() {
   const [apps, setApps] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [sourceFilter, setSourceFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [responseFilter, setResponseFilter] = useState('')
   const [platformFilter, setPlatformFilter] = useState('')
 
   const fetchApps = async () => {
     const params: Record<string, any> = { page: String(page), per_page: '25' }
+    if (sourceFilter) params.source = sourceFilter
     if (statusFilter) params.status = statusFilter
     if (responseFilter) params.response_status = responseFilter
     if (platformFilter) params.platform = platformFilter
@@ -24,7 +26,7 @@ export default function Applications() {
 
   useEffect(() => {
     fetchApps()
-  }, [page, statusFilter, responseFilter, platformFilter])
+  }, [page, sourceFilter, statusFilter, responseFilter, platformFilter])
 
   const updateResponse = async (id: number, response_status: string) => {
     await api.updateResponse(id, { response_status })
@@ -51,6 +53,32 @@ export default function Applications() {
         <span className="ml-auto text-[10px] font-black uppercase tracking-wider text-white/20">
           {total} records
         </span>
+      </div>
+
+      {/* Source tabs */}
+      <div className="flex gap-1 rounded-xl border border-white/5 bg-[#0A0A0A] p-1">
+        {[
+          { value: '', label: 'All' },
+          { value: 'bot', label: 'Bot Applied' },
+          { value: 'external', label: 'External' },
+        ].map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => {
+              setSourceFilter(value)
+              setPage(1)
+            }}
+            className={`rounded-lg px-4 py-2 text-[10px] font-black uppercase tracking-[0.15em] transition-colors ${
+              sourceFilter === value
+                ? value === 'external'
+                  ? 'bg-purple-500/20 text-purple-400'
+                  : 'bg-amber-500/20 text-amber-500'
+                : 'text-white/30 hover:text-white/50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Filters */}

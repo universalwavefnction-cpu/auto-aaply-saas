@@ -16,12 +16,17 @@ def list_applications(
     platform: str | None = None,
     status: str | None = None,
     response_status: str | None = None,
+    source: str | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     q = db.query(Application).filter(Application.user_id == user.id)
+    if source == "external":
+        q = q.filter(Application.status == "external")
+    elif source == "bot":
+        q = q.filter(Application.status != "external")
     if platform:
         q = q.filter(Application.platform == platform.lower())
     if status:
