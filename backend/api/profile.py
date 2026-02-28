@@ -38,6 +38,8 @@ class CredentialCreate(BaseModel):
     platform: str
     email: str
     password: str
+    gmail_email: str = ""
+    gmail_app_password: str = ""
 
 
 @router.get("")
@@ -60,7 +62,7 @@ def get_profile(user: User = Depends(get_current_user), db: Session = Depends(ge
             "questions_json": p.questions_json or {},
         },
         "credentials": [
-            {"id": c.id, "platform": c.platform, "email": c.email, "is_active": c.is_active} for c in creds
+            {"id": c.id, "platform": c.platform, "email": c.email, "is_active": c.is_active, "gmail_email": c.gmail_email or "", "has_gmail_app_password": bool(c.gmail_app_password_encrypted)} for c in creds
         ],
     }
 
@@ -160,10 +162,12 @@ def add_credential(
         platform=data.platform.lower(),
         email=data.email,
         password_encrypted=encrypt_credential(data.password),
+        gmail_email=data.gmail_email or None,
+        gmail_app_password_encrypted=encrypt_credential(data.gmail_app_password) if data.gmail_app_password else None,
     )
     db.add(cred)
     db.commit()
-    return {"id": cred.id, "platform": cred.platform}
+    return {"id": cred.id, "platform": cred.platform, "email": cred.email, "gmail_email": cred.gmail_email or "", "has_gmail_app_password": bool(cred.gmail_app_password_encrypted)}
 
 
 @router.delete("/credentials/{cred_id}")

@@ -79,13 +79,14 @@ export const api = {
     const token = getToken()
     const form = new FormData()
     form.append('file', file)
-    form.append('label', label)
     const res = await fetch(`${BASE}/profile/cv?label=${encodeURIComponent(label)}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: form,
     })
-    return res.json()
+    const data = await res.json()
+    if (!res.ok) return { error: data.detail || 'Upload failed' }
+    return data
   },
   deleteCV: (id: number) => request(`/profile/cv/${id}`, { method: 'DELETE' }),
 

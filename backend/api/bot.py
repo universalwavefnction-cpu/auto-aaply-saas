@@ -192,11 +192,17 @@ def list_sessions(
         end_log = db.query(BotLog).filter(BotLog.session_id == s.session_id, BotLog.event == "session_end").first()
         stats = end_log.data.get("stats", {}) if end_log and end_log.data else {}
 
+        # Count errors and warnings in this session
+        error_count = db.query(func.count(BotLog.id)).filter(
+            BotLog.session_id == s.session_id, BotLog.level.in_(["error", "warn"])
+        ).scalar() or 0
+
         entry = {
             "session_id": s.session_id,
             "started_at": s.started_at.isoformat() if s.started_at else None,
             "ended_at": s.ended_at.isoformat() if s.ended_at else None,
             "log_count": s.log_count,
+            "error_count": error_count,
             "applied": stats.get("applied", 0),
             "failed": stats.get("failed", 0),
             "skipped": stats.get("skipped", 0),
@@ -216,7 +222,7 @@ def get_logs(
     session_id: str = None,
     level: str = None,
     category: str = None,
-    limit: int = 200,
+    limit: int = 2000,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

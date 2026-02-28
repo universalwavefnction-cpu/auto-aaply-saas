@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { UserCircle, Save, FileText, Upload, Trash2, KeyRound, Plus, MessageSquare, CheckCircle2 } from 'lucide-react'
+import { UserCircle, Save, FileText, Upload, Trash2, KeyRound, Plus, MessageSquare, CheckCircle2, AlertTriangle, Shield } from 'lucide-react'
 import { api } from '../api'
 
 function Field({ label, value, onChange, className = '', type = 'text' }: { label: string; value: string; onChange: (v: string) => void; className?: string; type?: string }) {
@@ -17,7 +17,7 @@ export default function Profile() {
   const [questions, setQuestions] = useState<Record<string, string>>({})
   const [newQ, setNewQ] = useState('')
   const [newA, setNewA] = useState('')
-  const [newCred, setNewCred] = useState({ platform: 'stepstone', email: '', password: '' })
+  const [newCred, setNewCred] = useState({ platform: 'stepstone', email: '', password: '', gmail_email: '', gmail_app_password: '' })
   const [saved, setSaved] = useState(false)
   const [cvs, setCvs] = useState<any[]>([])
   const [cvLabel, setCvLabel] = useState('')
@@ -119,7 +119,7 @@ export default function Profile() {
                 <Upload className="h-4 w-4 shrink-0 text-white/40" /><span className="truncate text-sm text-white/60">{cvFile ? cvFile.name : 'Select PDF'}</span>
                 <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => setCvFile(e.target.files?.[0] || null)} />
               </label>
-              <button onClick={async () => { if (!cvFile || !cvLabel.trim()) return; setUploading(true); const res = await api.uploadCV(cvFile, cvLabel.trim()); if (res && !res.error) { setCvs([res, ...cvs]); setCvLabel(''); setCvFile(null); showToast('CV uploaded') }; setUploading(false) }} disabled={!cvFile || !cvLabel.trim() || uploading} className="flex w-full items-center justify-center rounded-xl bg-amber-500 px-6 py-3 font-bold text-black transition-all hover:bg-amber-400 disabled:opacity-30">
+              <button onClick={async () => { if (!cvFile) return; const label = cvLabel.trim() || cvFile.name.replace(/\.[^.]+$/, ''); setUploading(true); try { const res = await api.uploadCV(cvFile, label); if (res && !res.error) { setCvs([res, ...cvs]); setCvLabel(''); setCvFile(null); showToast('CV uploaded') } else { showToast(res?.error || 'Upload failed') } } catch (e: any) { showToast(e.message || 'Upload failed') }; setUploading(false) }} disabled={!cvFile || uploading} className="flex w-full items-center justify-center rounded-xl bg-amber-500 px-6 py-3 font-bold text-black transition-all hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-20">
                 {uploading ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent" /> : 'Upload'}
               </button>
             </div>
@@ -129,22 +129,67 @@ export default function Profile() {
             <div className="mb-6 flex items-center justify-between border-b border-white/5 pb-4"><div className="flex items-center gap-3"><KeyRound className="h-5 w-5 text-white/40" /><h2 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/60">Platform Access</h2></div></div>
             <div className="mb-6 space-y-3">
               {credentials.length === 0 ? <div className="py-6 text-center"><p className="text-[10px] italic text-white/20">No credentials configured</p></div> : credentials.map((c) => (
-                <div key={c.id} className="group flex items-center justify-between rounded-xl border border-white/5 bg-black/30 p-3 transition-colors hover:border-white/10">
-                  <div className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 text-[10px] font-black uppercase text-amber-500">{c.platform.substring(0, 2)}</div><div><p className="text-[10px] font-black uppercase tracking-wider text-white/60">{c.platform}</p><p className="text-xs text-white/40">{c.email}</p></div></div>
-                  <button onClick={async () => { await api.deleteCredential(c.id); setCredentials(credentials.filter((x) => x.id !== c.id)); showToast('Credential removed') }} className="rounded-lg p-2 text-white/20 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"><Trash2 className="h-4 w-4" /></button>
+                <div key={c.id} className="group rounded-xl border border-white/5 bg-black/30 p-3 transition-colors hover:border-white/10">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 text-[10px] font-black uppercase text-amber-500">{c.platform.substring(0, 2)}</div><div><p className="text-[10px] font-black uppercase tracking-wider text-white/60">{c.platform}</p><p className="text-xs text-white/40">{c.email}</p></div></div>
+                    <button onClick={async () => { await api.deleteCredential(c.id); setCredentials(credentials.filter((x) => x.id !== c.id)); showToast('Credential removed') }} className="rounded-lg p-2 text-white/20 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                  {c.platform === 'linkedin' && (
+                    <div className="mt-2 flex items-center gap-2 pl-11">
+                      {c.has_gmail_app_password ? (
+                        <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Email verification configured ({c.gmail_email})</span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[9px] font-bold text-red-400"><AlertTriangle className="h-3 w-3" /> Email verification not configured — bot cannot log in</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
             <div className="space-y-3 rounded-xl border border-white/5 bg-black/30 p-4">
               <span className="block text-[9px] font-black uppercase tracking-[0.2em] text-white/40">Add Credential</span>
               <select value={newCred.platform} onChange={(e) => setNewCred({ ...newCred, platform: e.target.value })} className="w-full cursor-pointer appearance-none rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-sm text-white transition-colors focus:border-amber-500/50 focus:bg-black focus:outline-none">
-                <option value="stepstone">StepStone</option><option value="xing">Xing</option><option value="indeed">Indeed</option><option value="linkedin">LinkedIn</option>
+                <option value="stepstone">StepStone</option><option value="xing">Xing</option><option value="linkedin">LinkedIn</option>
               </select>
               <input value={newCred.email} onChange={(e) => setNewCred({ ...newCred, email: e.target.value })} placeholder="Email / Username" className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-sm text-white placeholder:text-white/20 focus:border-amber-500/50 focus:bg-black focus:outline-none" />
               <div className="flex gap-2">
                 <input type="password" value={newCred.password} onChange={(e) => setNewCred({ ...newCred, password: e.target.value })} placeholder="Password" className="flex-1 rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-sm text-white placeholder:text-white/20 focus:border-amber-500/50 focus:bg-black focus:outline-none" />
-                <button onClick={async () => { if (!newCred.email || !newCred.password) return; const res = await api.addCredential(newCred); if (res && !res.error) { setCredentials([...credentials, res]); setNewCred({ platform: 'stepstone', email: '', password: '' }); showToast('Credential added') } }} disabled={!newCred.email || !newCred.password} className="flex items-center justify-center rounded-xl bg-white/10 px-6 font-bold text-white transition-all hover:bg-white/20 disabled:opacity-30"><Plus className="h-5 w-5" /></button>
+                <button onClick={async () => { if (!newCred.email || !newCred.password) return; const res = await api.addCredential(newCred); if (res && !res.error) { setCredentials([...credentials, res]); setNewCred({ platform: 'stepstone', email: '', password: '', gmail_email: '', gmail_app_password: '' }); showToast('Credential added') } }} disabled={!newCred.email || !newCred.password} className="flex items-center justify-center rounded-xl bg-white/10 px-6 font-bold text-white transition-all hover:bg-white/20 disabled:opacity-30"><Plus className="h-5 w-5" /></button>
               </div>
+
+              {newCred.platform === 'linkedin' && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Shield className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                    <div>
+                      <p className="text-xs font-bold text-amber-400">LinkedIn requires email verification</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-white/50">
+                        LinkedIn sends a verification code via email every time the bot logs in. You need to provide a Gmail App Password so the bot can read the code automatically.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/5 bg-black/30 p-3 space-y-2">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">How to get your App Password</p>
+                    <ol className="space-y-1.5 text-[11px] text-white/50 list-decimal list-inside">
+                      <li>Go to <a href="https://myaccount.google.com/security" target="_blank" rel="noopener" className="text-amber-500 underline">Google Account &rarr; Security</a></li>
+                      <li>Enable <span className="font-bold text-white/70">2-Step Verification</span> if not already on</li>
+                      <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" className="text-amber-500 underline">App Passwords</a></li>
+                      <li>Create a new app password (name it "AutoApply")</li>
+                      <li>Paste the 16-character code below</li>
+                    </ol>
+                  </div>
+                  <input value={newCred.gmail_email} onChange={(e) => setNewCred({ ...newCred, gmail_email: e.target.value })} placeholder="Gmail address (e.g. you@gmail.com)" className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-sm text-white placeholder:text-white/20 focus:border-amber-500/50 focus:bg-black focus:outline-none" />
+                  <input value={newCred.gmail_app_password} onChange={(e) => setNewCred({ ...newCred, gmail_app_password: e.target.value })} placeholder="Gmail App Password (16 characters)" className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-sm font-mono text-white placeholder:text-white/20 focus:border-amber-500/50 focus:bg-black focus:outline-none" />
+                  {!newCred.gmail_email && !newCred.gmail_app_password && (
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-red-400/60" />
+                      <p className="text-[10px] text-red-400/60">
+                        Without these fields, the bot cannot log into LinkedIn. Need help? <a href="/support" className="text-amber-500 underline">Contact Support</a>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

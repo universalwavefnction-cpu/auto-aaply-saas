@@ -60,6 +60,8 @@ class PlatformCredential(Base):
     email = Column(String)
     password_encrypted = Column(String)
     is_active = Column(Boolean, default=True)
+    gmail_email = Column(String, nullable=True)  # For LinkedIn: Gmail used for verification codes
+    gmail_app_password_encrypted = Column(String, nullable=True)  # Google App Password (16-char)
 
     user = relationship("User", back_populates="credentials")
 
@@ -72,6 +74,17 @@ class PlatformCredential(Base):
         except Exception:
             # Legacy plaintext — return as-is (will be re-encrypted on next save)
             return self.password_encrypted
+
+    def get_gmail_app_password(self) -> str:
+        """Decrypt the stored Gmail app password."""
+        if not self.gmail_app_password_encrypted:
+            return ""
+        from .security import decrypt_credential
+
+        try:
+            return decrypt_credential(self.gmail_app_password_encrypted)
+        except Exception:
+            return self.gmail_app_password_encrypted
 
 
 class Job(Base):

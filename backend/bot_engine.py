@@ -1712,12 +1712,14 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     # Don't dismiss popups yet — the summary IS an overlay/dialog
                     await self._dismiss_consent()
 
-                    # Wait for summary overlay to appear (up to 12s)
+                    # Wait for summary overlay or confirmation page (up to 12s)
                     has_summary = False
+                    auto_confirmed = False
                     for _sw in range(12):
                         await asyncio.sleep(1)
                         try:
                             page_text = (await self._page.inner_text("body")).lower()
+                            # Check for summary page (needs "Continue application")
                             if any(kw in page_text for kw in [
                                 "zusammenfassung", "bewerbung fortsetzen",
                                 "bewerbung bearbeiten", "continue application",
@@ -1726,8 +1728,37 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                             ]):
                                 has_summary = True
                                 break
+                            # Check for confirmation page (auto-submitted without summary)
+                            if any(kw in page_text for kw in [
+                                "hat alles geklappt", "did all go well",
+                                "eckdaten zur bewerbung",
+                                "so kommst du schneller zum richtigen job",
+                                "deine bewerbungen auf einen blick",
+                            ]):
+                                auto_confirmed = True
+                                break
                         except:
                             break
+
+                    if auto_confirmed:
+                        application.status = "success"
+                        self.stats["applied"] += 1
+                        apply_duration = time.time() - t0
+                        await self.screenshot("after_apply_click")
+                        await self.log("info", "apply", "success", {
+                            "message": f"  SUCCESS — Interest auto-submitted ({apply_duration:.0f}s)",
+                            "duration_s": apply_duration,
+                        }, job_id=job.id, platform=job.platform)
+                        db.commit()
+                        await self.emit_progress()
+                        if i < len(jobs) - 1 and self.running:
+                            delay = random.uniform(15, 25)
+                            await self.log("info", "system", "delay", {
+                                "message": f"  Waiting {delay:.0f}s before next application...",
+                                "delay_s": delay,
+                            })
+                            await asyncio.sleep(delay)
+                        continue
 
                     await self.screenshot("after_apply_click")
 
@@ -2055,10 +2086,187 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 await asyncio.sleep(delay)
                             continue
 
-                    # No summary — check if interest was registered directly
+                    # No summary detected — dismiss popups and re-check page
+                    try:
+                        await self._dismiss_popups()
+                    except:
+                        pass
+                    await asyncio.sleep(1)
+                    try:
+                        page_text = (await self._page.inner_text("body")).lower()
+                    except:
+                        pass
+
+                    # First check: are we already on the SUCCESS/confirmation page?
+                    # (Some jobs auto-submit interest without showing summary)
+                    is_confirmed = any(kw in page_text for kw in [
+                        # English
+                        "did all go well", "application sent", "thank you",
+                        # German
+                        "hat alles geklappt", "eckdaten zur bewerbung",
+                        "bewerbung abgeschickt", "vielen dank",
+                        "deine bewerbungen auf einen blick",
+                        "falls nicht, kannst du dich auf der unternehmenswebsite",
+                        # WhatsApp popup (only appears after successful submission)
+                        "so kommst du schneller zum richtigen job",
+                    ])
+
+                    if is_confirmed:
+                        application.status = "success"
+                        self.stats["applied"] += 1
+                        apply_duration = time.time() - t0
+                        await self.log("info", "apply", "success", {
+                            "message": f"  SUCCESS — Interest auto-submitted, confirmation page detected ({apply_duration:.0f}s)",
+                            "duration_s": apply_duration,
+                        }, job_id=job.id, platform=job.platform)
+                        db.commit()
+                        await self.emit_progress()
+                        if i < len(jobs) - 1 and self.running:
+                            delay = random.uniform(15, 25)
+                            await self.log("info", "system", "delay", {
+                                "message": f"  Waiting {delay:.0f}s before next application...",
+                                "delay_s": delay,
+                            })
+                            await asyncio.sleep(delay)
+                        continue
+
+                    # Check if we're actually on the summary page (missed by the loop above)
+                    late_summary = any(kw in page_text for kw in [
+                        "application summary", "zusammenfassung",
+                        "continue application", "bewerbung fortsetzen",
+                        "edit application", "bewerbung bearbeiten",
+                        "haupt-lebenslauf", "kontaktdaten", "your default cv",
+                    ])
+
+                    if late_summary:
+                        await self.log("info", "apply", "late_summary_detected", {
+                            "message": "  Summary page detected (late render) — clicking 'Continue application'...",
+                        }, job_id=job.id, platform=job.platform)
+                        # Click "Continue application" / "Bewerbung fortsetzen"
+                        fortsetzen_btn = None
+                        for sel in [
+                            'button:has-text("Bewerbung fortsetzen")',
+                            'a:has-text("Bewerbung fortsetzen")',
+                            'button:has-text("Continue application")',
+                            'a:has-text("Continue application")',
+                            'button:has-text("Bewerbung abschicken")',
+                        ]:
+                            fortsetzen_btn = await self._page.query_selector(sel)
+                            if fortsetzen_btn and await fortsetzen_btn.is_visible():
+                                break
+                            fortsetzen_btn = None
+
+                        if fortsetzen_btn:
+                            btn_label = (await fortsetzen_btn.inner_text()).strip()
+                            await self.log("info", "apply", "submitting", {
+                                "message": f"  Clicking \"{btn_label}\"...",
+                            }, job_id=job.id, platform=job.platform)
+                            await fortsetzen_btn.scroll_into_view_if_needed()
+                            await asyncio.sleep(0.5)
+                            pre_url = self._page.url
+                            await fortsetzen_btn.evaluate("el => el.click()")
+                            for _wait in range(10):
+                                await asyncio.sleep(1)
+                                if self._page.url != pre_url:
+                                    break
+                            await asyncio.sleep(2)
+                            await self.screenshot("after_late_summary_submit")
+
+                            # Check result
+                            final_text = ""
+                            try:
+                                final_text = (await self._page.inner_text("body")).lower()
+                            except:
+                                pass
+                            final_url = self._page.url
+
+                            success = any(kw in final_text for kw in [
+                                "bewerbung abgeschickt", "application sent", "erfolgreich",
+                                "vielen dank", "thank you", "gesendet", "submitted",
+                                "bewerbung wurde", "application has been",
+                                "did all go well", "hat alles geklappt",
+                            ]) or "success" in final_url or "confirmation" in final_url
+
+                            is_external = (
+                                "zur verfügung gestellt von stepstone" in final_text
+                                or "brought to you by stepstone" in final_text
+                                or "no listing title" in final_text
+                                or "sie bewerben sich" in final_text and "stepstone" in final_text
+                            )
+
+                            if not success and not is_external:
+                                still_has = await self._page.query_selector('button:has-text("Bewerbung fortsetzen")')
+                                if not still_has:
+                                    still_has = await self._page.query_selector('button:has-text("Continue application")')
+                                if not still_has:
+                                    success = True
+
+                            if is_external:
+                                application.status = "external"
+                                application.error_log = "Redirected to company external form"
+                                self.stats["external"] = self.stats.get("external", 0) + 1
+                                apply_duration = time.time() - t0
+                                await self.log("warn", "apply", "external_redirect", {
+                                    "message": f"  EXTERNAL — Redirected to company form ({apply_duration:.0f}s)",
+                                    "url": final_url,
+                                    "duration_s": apply_duration,
+                                }, job_id=job.id, platform=job.platform)
+                            elif success:
+                                application.status = "success"
+                                self.stats["applied"] += 1
+                                apply_duration = time.time() - t0
+                                await self.log("info", "apply", "success", {
+                                    "message": f"  SUCCESS — Application submitted via late summary ({apply_duration:.0f}s)",
+                                    "duration_s": apply_duration,
+                                }, job_id=job.id, platform=job.platform)
+                            else:
+                                application.status = "failed"
+                                self.stats["failed"] += 1
+                                apply_duration = time.time() - t0
+                                application.error_log = "Submit not confirmed after clicking continue"
+                                await self.log("warn", "apply", "submit_uncertain", {
+                                    "message": f"  UNCERTAIN — No confirmation after clicking continue ({apply_duration:.0f}s)",
+                                    "url": final_url,
+                                    "duration_s": apply_duration,
+                                }, job_id=job.id, platform=job.platform)
+
+                            db.commit()
+                            await self.emit_progress()
+                            if i < len(jobs) - 1 and self.running:
+                                delay = random.uniform(15, 25)
+                                await self.log("info", "system", "delay", {
+                                    "message": f"  Waiting {delay:.0f}s before next application...",
+                                    "delay_s": delay,
+                                })
+                                await asyncio.sleep(delay)
+                            continue
+                        else:
+                            # Summary page but can't find continue button
+                            application.status = "failed"
+                            self.stats["failed"] += 1
+                            application.error_log = "Summary page detected but no Continue button found"
+                            await self.log("warn", "apply", "no_continue_btn", {
+                                "message": "  Summary page detected but no Continue button found",
+                            }, job_id=job.id, platform=job.platform)
+                            db.commit()
+                            await self.emit_progress()
+                            if i < len(jobs) - 1 and self.running:
+                                delay = random.uniform(15, 25)
+                                await self.log("info", "system", "delay", {
+                                    "message": f"  Waiting {delay:.0f}s before next application...",
+                                    "delay_s": delay,
+                                })
+                                await asyncio.sleep(delay)
+                            continue
+
+                    # No summary at all — check if interest was registered directly
                     interest_confirmed = any(kw in page_text for kw in [
                         "interesse wurde", "interesse bekundet", "interest has been",
                         "interest expressed", "already applied", "bereits beworben",
+                        "did all go well", "hat alles geklappt",
+                        "eckdaten zur bewerbung", "deine bewerbungen auf einen blick",
+                        "so kommst du schneller zum richtigen job",
+                        "bewerbung abgeschickt", "vielen dank",
                     ])
                     if not interest_confirmed:
                         btn_still = None
@@ -2073,8 +2281,34 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 if is_disabled is not None or aria_disabled == "true":
                                     interest_confirmed = True
                                 break
+                        # Button gone but could be on an unknown page — DON'T assume success
                         if not btn_still:
-                            interest_confirmed = True
+                            # Extra check: are we on a confirmation page?
+                            is_confirmation = any(kw in page_text for kw in [
+                                "did all go well", "hat alles geklappt",
+                                "bewerbung abgeschickt", "application sent",
+                                "vielen dank", "thank you",
+                            ])
+                            if is_confirmation:
+                                interest_confirmed = True
+                            else:
+                                await self.log("warn", "apply", "button_gone_uncertain", {
+                                    "message": "  Button gone but no confirmation — marking failed",
+                                    "url": self._page.url,
+                                }, job_id=job.id, platform=job.platform)
+                                application.status = "failed"
+                                self.stats["failed"] += 1
+                                application.error_log = "Interest button disappeared but no confirmation detected"
+                                db.commit()
+                                await self.emit_progress()
+                                if i < len(jobs) - 1 and self.running:
+                                    delay = random.uniform(15, 25)
+                                    await self.log("info", "system", "delay", {
+                                        "message": f"  Waiting {delay:.0f}s before next application...",
+                                        "delay_s": delay,
+                                    })
+                                    await asyncio.sleep(delay)
+                                continue
 
                     if interest_confirmed:
                         application.status = "success"
@@ -2760,12 +2994,27 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
         if phone.startswith("0"):
             phone = phone[1:]
 
+        last_step_sig = None
+        stuck_count = 0
         for step in range(8):
             await asyncio.sleep(random.uniform(1.5, 3))
             try:
                 page_text = (await page.inner_text("body")).lower()
             except:
                 return (False, "Page closed unexpectedly")
+
+            # Detect stuck loop — same page content hash means we're not advancing
+            step_sig = page_text[:500]
+            if step_sig == last_step_sig:
+                stuck_count += 1
+                if stuck_count >= 2:
+                    await self.log("warn", "apply", "xing_ea_stuck_loop", {
+                        "message": f"  Stuck on same step for {stuck_count+1} iterations — aborting",
+                    }, job_id=job.id, platform="xing")
+                    return (False, f"Stuck on same step (repeated {stuck_count+1} times)")
+            else:
+                stuck_count = 0
+            last_step_sig = step_sig
 
             await self.screenshot(f"xing_ea_step{step}")
 
@@ -2863,57 +3112,83 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     "message": f"  Step {step+1}: Filled name+phone ({filled} fields)",
                 }, job_id=job.id, platform="xing")
 
-            # Step: Document upload
-            elif "document" in page_text or "dokument" in page_text or "upload" in page_text or "lebenslauf" in page_text or "cv" in page_text:
-                uploaded = False
-                if cv_path and os.path.exists(cv_path):
-                    # Try direct file input first
-                    file_inputs = await page.query_selector_all('input[type="file"]')
-                    if file_inputs:
-                        try:
-                            await file_inputs[0].set_input_files(cv_path)
-                            uploaded = True
-                        except:
-                            pass
+            # Step: Document upload — only match when there's an actual file input or upload button visible
+            elif await page.query_selector('input[type="file"]') or any(
+                await page.query_selector(s) for s in [
+                    'button:has-text("Upload")', 'button:has-text("Hochladen")',
+                    'button:has-text("Lebenslauf")', '[data-testid*="upload"]'
+                ]
+            ):
+                # Check if a CV is already attached from the Xing profile
+                already_attached = await page.evaluate("""() => {
+                    const body = document.body.innerText.toLowerCase();
+                    // Look for signs a document is already attached: filename with extension,
+                    // "attached", "uploaded", checkmarks near document area, delete/remove buttons
+                    const hasFile = document.querySelector('[data-testid*="file"], [data-testid*="document"], .file-name, .document-name');
+                    const hasRemoveBtn = document.querySelector('button[aria-label*="remove"], button[aria-label*="delete"], button[aria-label*="entfernen"], button[aria-label*="löschen"]');
+                    // Check for filename patterns like "name.pdf", "cv.docx" etc.
+                    const filePattern = /[\\w-]+\\.(pdf|docx?|rtf)/i;
+                    const hasFilename = filePattern.test(body);
+                    // Check for "already uploaded" / "attached" indicators
+                    const attachedKeywords = ['attached', 'angehängt', 'hochgeladen', 'uploaded'];
+                    const hasAttachedText = attachedKeywords.some(kw => body.includes(kw));
+                    return !!(hasFile || hasRemoveBtn || hasFilename || hasAttachedText);
+                }""")
 
-                    # If no file input, click "Upload CV" button to reveal it
-                    if not uploaded:
-                        for sel in ['button:has-text("Upload CV")', 'button:has-text("Upload")',
-                                    'button:has-text("Hochladen")', 'button:has-text("Lebenslauf hochladen")',
-                                    'a:has-text("Upload CV")', '[data-testid*="upload"]']:
-                            btn = await page.query_selector(sel)
-                            if btn and await btn.is_visible():
-                                await btn.click()
-                                await asyncio.sleep(2)
-                                file_inputs = await page.query_selector_all('input[type="file"]')
-                                if file_inputs:
-                                    try:
-                                        await file_inputs[0].set_input_files(cv_path)
-                                        uploaded = True
-                                    except:
-                                        pass
-                                break
-
-                    if not uploaded:
-                        # Last resort: find ANY file input (even hidden)
-                        try:
-                            await page.evaluate("""() => {
-                                document.querySelectorAll('input[type="file"]').forEach(i => {
-                                    i.style.display = 'block';
-                                    i.style.opacity = '1';
-                                });
-                            }""")
-                            await asyncio.sleep(0.5)
-                            file_inputs = await page.query_selector_all('input[type="file"]')
-                            if file_inputs:
+                if already_attached:
+                    await self.log("info", "apply", "xing_ea_cv", {
+                        "message": f"  Step {step+1}: CV already attached from Xing profile",
+                    }, job_id=job.id, platform="xing")
+                else:
+                    uploaded = False
+                    if cv_path and os.path.exists(cv_path):
+                        # Try direct file input first
+                        file_inputs = await page.query_selector_all('input[type="file"]')
+                        if file_inputs:
+                            try:
                                 await file_inputs[0].set_input_files(cv_path)
                                 uploaded = True
-                        except:
-                            pass
+                            except:
+                                pass
 
-                await self.log("info", "apply", "xing_ea_cv", {
-                    "message": f"  Step {step+1}: CV upload {'OK' if uploaded else 'FAILED'} ({os.path.basename(cv_path) if cv_path else 'no CV'})",
-                }, job_id=job.id, platform="xing")
+                        # If no file input, click "Upload CV" button to reveal it
+                        if not uploaded:
+                            for sel in ['button:has-text("Upload CV")', 'button:has-text("Upload")',
+                                        'button:has-text("Hochladen")', 'button:has-text("Lebenslauf hochladen")',
+                                        'a:has-text("Upload CV")', '[data-testid*="upload"]']:
+                                btn = await page.query_selector(sel)
+                                if btn and await btn.is_visible():
+                                    await btn.click()
+                                    await asyncio.sleep(2)
+                                    file_inputs = await page.query_selector_all('input[type="file"]')
+                                    if file_inputs:
+                                        try:
+                                            await file_inputs[0].set_input_files(cv_path)
+                                            uploaded = True
+                                        except:
+                                            pass
+                                    break
+
+                        if not uploaded:
+                            # Last resort: find ANY file input (even hidden)
+                            try:
+                                await page.evaluate("""() => {
+                                    document.querySelectorAll('input[type="file"]').forEach(i => {
+                                        i.style.display = 'block';
+                                        i.style.opacity = '1';
+                                    });
+                                }""")
+                                await asyncio.sleep(0.5)
+                                file_inputs = await page.query_selector_all('input[type="file"]')
+                                if file_inputs:
+                                    await file_inputs[0].set_input_files(cv_path)
+                                    uploaded = True
+                            except:
+                                pass
+
+                    await self.log("info", "apply", "xing_ea_cv", {
+                        "message": f"  Step {step+1}: CV upload {'OK' if uploaded else 'FAILED'} ({os.path.basename(cv_path) if cv_path else 'no CV'})",
+                    }, job_id=job.id, platform="xing")
 
             # Step: Review — fill optional message, then click Apply
             elif "review" in page_text or "überprüf" in page_text or "prüfen" in page_text:
@@ -3317,8 +3592,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
         except:
             pass
 
-    @staticmethod
-    def _fetch_indeed_code_from_gmail(email: str, app_password: str, timeout_s: int = 90, sender: str = "indeed") -> str | None:
+    def _fetch_indeed_code_from_gmail(self, email: str, app_password: str, timeout_s: int = 90, sender: str = "indeed") -> str | None:
         """Poll Gmail via IMAP for the latest verification code from a sender."""
         import imaplib
         import email as email_lib
@@ -4551,12 +4825,23 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                             "message": "  LinkedIn requires email verification code — checking Gmail...",
                         }, platform="linkedin")
 
-                        # Use LinkedIn-specific Gmail or fall back to default
-                        gmail_email = settings.GMAIL_EMAIL_LI or settings.GMAIL_EMAIL
-                        gmail_app_pw = settings.GMAIL_APP_PASSWORD_LI or settings.GMAIL_APP_PASSWORD
+                        # Use per-user Gmail credentials from their LinkedIn credential, fall back to global
+                        gmail_email = ""
+                        gmail_app_pw = ""
+                        if self._db:
+                            from .models import PlatformCredential as _PC
+                            li_cred = self._db.query(_PC).filter(
+                                _PC.user_id == self.user_id, _PC.platform == "linkedin"
+                            ).first()
+                            if li_cred and hasattr(li_cred, 'gmail_email') and li_cred.gmail_email:
+                                gmail_email = li_cred.gmail_email
+                                gmail_app_pw = li_cred.get_gmail_app_password() if hasattr(li_cred, 'get_gmail_app_password') else ""
+                        if not gmail_email or not gmail_app_pw:
+                            gmail_email = settings.GMAIL_EMAIL_LI or settings.GMAIL_EMAIL
+                            gmail_app_pw = settings.GMAIL_APP_PASSWORD_LI or settings.GMAIL_APP_PASSWORD
                         if not gmail_email or not gmail_app_pw:
                             await self.log("error", "apply", "no_gmail", {
-                                "message": "  Code verification requires GMAIL_EMAIL + GMAIL_APP_PASSWORD in .env",
+                                "message": "  LinkedIn verification code required but no Gmail IMAP configured. Go to Profile → Platform Access → LinkedIn to set up your Gmail App Password.",
                             }, platform="linkedin")
                             return False
 
@@ -4564,7 +4849,11 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         code_input = await page.query_selector('input#input__email_verification_pin, input[name="pin"], input[type="text"]')
                         if code_input:
                             # Fetch code from Gmail (LinkedIn sends from "linkedin")
-                            code = self._fetch_indeed_code_from_gmail(gmail_email, gmail_app_pw, timeout_s=90, sender="linkedin")
+                            # Must use run_in_executor — _fetch_indeed_code_from_gmail is blocking (IMAP polling)
+                            code = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: self._fetch_indeed_code_from_gmail(gmail_email, gmail_app_pw, timeout_s=90, sender="linkedin")
+                            )
                             if code:
                                 await self.log("info", "apply", "got_code", {
                                     "message": f"  Got LinkedIn verification code: {code}",
@@ -4580,16 +4869,44 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 )
                                 if submit_btn:
                                     await submit_btn.click()
-                                    await asyncio.sleep(5)
+
+                                # Poll for redirect — LinkedIn may show intermediate pages
+                                for _wait in range(20):
+                                    await asyncio.sleep(2)
+                                    cur_url = page.url
+
+                                    # Success — landed on a logged-in page
+                                    if any(x in cur_url for x in ["/feed", "/jobs", "/mynetwork", "/messaging"]):
+                                        await self.screenshot("linkedin_after_code")
+                                        await self.log("info", "apply", "login_success", {
+                                            "message": "  Login successful after code verification!",
+                                        }, platform="linkedin")
+                                        return True
+
+                                    # Left the challenge page — likely logged in
+                                    if "checkpoint" not in cur_url and "challenge" not in cur_url and "login" not in cur_url:
+                                        await self.screenshot("linkedin_after_code")
+                                        await self.log("info", "apply", "login_success", {
+                                            "message": f"  Login successful (redirected to {cur_url[:60]})",
+                                        }, platform="linkedin")
+                                        return True
+
+                                    # Still on challenge — click through secondary buttons
+                                    for skip_sel in ['button:has-text("Done")', 'button:has-text("Fertig")',
+                                                     'button:has-text("Skip")', 'button:has-text("Überspringen")',
+                                                     'button:has-text("Yes")', 'button:has-text("Ja")',
+                                                     'button:has-text("Continue")', 'button:has-text("Weiter")',
+                                                     'button[type="submit"]']:
+                                        skip_btn = await page.query_selector(skip_sel)
+                                        if skip_btn and await skip_btn.is_visible():
+                                            try:
+                                                await skip_btn.click()
+                                                await asyncio.sleep(2)
+                                            except:
+                                                pass
+                                            break
 
                                 await self.screenshot("linkedin_after_code")
-
-                                # Check if we're logged in now
-                                if any(x in page.url for x in ["/feed", "/jobs", "/mynetwork", "/messaging"]):
-                                    await self.log("info", "apply", "login_success", {
-                                        "message": "  Login successful after code verification!",
-                                    }, platform="linkedin")
-                                    return True
                             else:
                                 await self.log("error", "apply", "no_code", {
                                     "message": "  Could not retrieve verification code from Gmail",
@@ -5167,10 +5484,11 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     if el:
                         modal_text = (await el.inner_text()).lower()
                         break
-                if any(kw in modal_text for kw in [
-                    "application sent", "bewerbung gesendet", "submitted",
+                if submitted_once and any(kw in modal_text for kw in [
+                    "application sent", "bewerbung gesendet",
                     "application was sent", "bewerbung wurde gesendet",
-                    "thank you", "danke", "your application", "done",
+                    "your application was submitted", "deine bewerbung wurde gesendet",
+                    "successfully submitted", "erfolgreich gesendet",
                 ]):
                     await self.log("info", "form", "success_text", {
                         "message": "  Success text detected in modal",

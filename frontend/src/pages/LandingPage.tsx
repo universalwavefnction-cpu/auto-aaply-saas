@@ -18,7 +18,6 @@ import {
   Check,
   Zap,
   Globe,
-  Star,
   Mail,
   MessageSquare,
 } from 'lucide-react'
@@ -32,11 +31,12 @@ const t = {
     heroH1Span: 'while you sleep.',
     heroP:
       'AutoApply scans StepStone and LinkedIn for your target roles and submits applications automatically — CV, cover letter, and all form fields handled.',
-    ctaMain: 'Start applying — €8/mo',
+    ctaMain: 'Start applying — €3/mo',
     ctaSecondary: 'See how it works',
     trusted: 'Trusted by job seekers across Germany',
     howLabel: 'How it works',
     howH2: 'Six steps. Zero effort.',
+    howNote: 'Important: Don\'t forget to save your platform credentials in your Profile — the bot needs them to log in and apply on your behalf.',
     steps: [
       {
         title: 'Log in',
@@ -101,25 +101,6 @@ const t = {
       'Smart AI form filling',
       'Cancel anytime',
     ],
-    reviewsLabel: 'Reviews',
-    reviewsH2: 'What our users say.',
-    reviews: [
-      {
-        name: 'Markus W.',
-        role: 'Software Engineer, Berlin',
-        quote: 'I got 12 interview invitations in my first week. AutoApply saved me dozens of hours of manual applications.',
-      },
-      {
-        name: 'Sarah K.',
-        role: 'Marketing Manager, Munich',
-        quote: 'The bot filled out every form perfectly — even tricky questions about salary expectations and availability.',
-      },
-      {
-        name: 'Thomas L.',
-        role: 'Data Analyst, Hamburg',
-        quote: 'I was skeptical at first, but the live monitoring convinced me. You can see exactly what the bot does in real-time.',
-      },
-    ],
     contactLabel: 'Contact',
     contactH2: 'Have questions?',
     contactP: 'We usually respond within 24 hours.',
@@ -135,11 +116,12 @@ const t = {
     heroH1Span: 'während du schläfst.',
     heroP:
       'AutoApply durchsucht StepStone und LinkedIn nach passenden Stellen und verschickt Bewerbungen automatisch — Lebenslauf, Anschreiben und alle Formularfelder inklusive.',
-    ctaMain: 'Jetzt bewerben — 8 €/Monat',
+    ctaMain: 'Jetzt bewerben — 3 €/Monat',
     ctaSecondary: 'So funktioniert es',
     trusted: 'Vertraut von Jobsuchenden in ganz Deutschland',
     howLabel: 'So funktioniert es',
     howH2: 'Sechs Schritte. Null Aufwand.',
+    howNote: 'Wichtig: Vergiss nicht, deine Plattform-Zugangsdaten im Profil zu speichern — der Bot braucht sie, um sich einzuloggen und sich in deinem Namen zu bewerben.',
     steps: [
       {
         title: 'Einloggen',
@@ -203,25 +185,6 @@ const t = {
       'Mehrere Lebensläufe verwalten',
       'KI-gestützte Formularfelder',
       'Jederzeit kündbar',
-    ],
-    reviewsLabel: 'Bewertungen',
-    reviewsH2: 'Was unsere Nutzer sagen.',
-    reviews: [
-      {
-        name: 'Markus W.',
-        role: 'Software-Entwickler, Berlin',
-        quote: 'Ich habe in meiner ersten Woche 12 Einladungen zu Vorstellungsgesprächen bekommen. AutoApply hat mir dutzende Stunden erspart.',
-      },
-      {
-        name: 'Sarah K.',
-        role: 'Marketing-Managerin, München',
-        quote: 'Der Bot hat jedes Formular perfekt ausgefüllt — sogar knifflige Fragen zu Gehaltsvorstellungen und Verfügbarkeit.',
-      },
-      {
-        name: 'Thomas L.',
-        role: 'Datenanalyst, Hamburg',
-        quote: 'Ich war anfangs skeptisch, aber die Live-Überwachung hat mich überzeugt. Man sieht genau, was der Bot in Echtzeit macht.',
-      },
     ],
     contactLabel: 'Kontakt',
     contactH2: 'Noch Fragen?',
@@ -362,6 +325,10 @@ export default function LandingPage() {
               )
             })}
           </div>
+
+          <div className="mt-10 rounded-xl border border-amber-500/20 bg-amber-500/5 px-6 py-4 text-center">
+            <p className="text-sm font-bold text-amber-300">{l.howNote}</p>
+          </div>
         </div>
       </section>
 
@@ -395,48 +362,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Reviews */}
-      <section className="relative z-10 border-t border-white/5 py-24">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-16 text-center">
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
-              {l.reviewsLabel}
-            </span>
-            <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl">
-              {l.reviewsH2}
-            </h2>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-3">
-            {l.reviews.map(({ name, role, quote }) => (
-              <div
-                key={name}
-                className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-8 transition-colors hover:border-white/10"
-              >
-                <div className="mb-4 flex gap-1">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star
-                      key={i}
-                      className="h-4 w-4 fill-amber-500 text-amber-500"
-                    />
-                  ))}
-                </div>
-                <p className="mb-6 text-sm leading-relaxed text-white/60">"{quote}"</p>
-                <div className="flex items-center gap-3 border-t border-white/5 pt-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/10 text-xs font-black text-amber-500">
-                    {name.split(' ').map((n) => n[0]).join('')}
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold">{name}</p>
-                    <p className="text-[10px] text-white/40">{role}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Pricing */}
       <section className="relative z-10 border-t border-white/5 py-24">
         <div className="mx-auto max-w-md px-6 text-center">
@@ -449,7 +374,7 @@ export default function LandingPage() {
 
           <div className="rounded-2xl border border-amber-500/20 bg-[#0A0A0A] p-8 shadow-[0_0_40px_rgba(245,158,11,0.05)]">
             <div className="mb-6">
-              <span className="text-5xl font-black">€8</span>
+              <span className="text-5xl font-black">€3</span>
               <span className="text-lg text-white/40">
                 {' '}
                 / {lang === 'de' ? 'Monat' : 'month'}

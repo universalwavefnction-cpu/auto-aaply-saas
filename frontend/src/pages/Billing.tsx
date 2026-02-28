@@ -158,7 +158,7 @@ export default function Billing() {
               >
                 <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
                 <span className="relative">
-                  {actionLoading ? 'Redirecting...' : 'Subscribe — €8/month'}
+                  {actionLoading ? 'Redirecting...' : 'Subscribe — €3/month (Pilot)'}
                 </span>
               </button>
             )}
@@ -170,7 +170,7 @@ export default function Billing() {
               Plan Details
             </span>
             <div className="mt-4 mb-6 flex items-baseline gap-1">
-              <span className="text-3xl font-black">€8</span>
+              <span className="text-3xl font-black">€3</span>
               <span className="text-sm text-white/40"> / month</span>
             </div>
             <ul className="space-y-3">

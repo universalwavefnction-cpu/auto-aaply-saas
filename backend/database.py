@@ -47,4 +47,11 @@ def migrate_db():
         if "user_id" not in job_cols:
             conn.execute(text("ALTER TABLE jobs ADD COLUMN user_id INTEGER REFERENCES users(id)"))
 
+        # Credentials table: add gmail fields for LinkedIn verification
+        cred_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(credentials)"))}
+        if "gmail_email" not in cred_cols:
+            conn.execute(text("ALTER TABLE credentials ADD COLUMN gmail_email VARCHAR"))
+        if "gmail_app_password_encrypted" not in cred_cols:
+            conn.execute(text("ALTER TABLE credentials ADD COLUMN gmail_app_password_encrypted VARCHAR"))
+
         conn.commit()

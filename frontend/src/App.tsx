@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   MessageSquare,
+  AlertCircle,
 } from 'lucide-react'
 
 import { api } from './api'
@@ -32,6 +33,7 @@ import LandingPage from './pages/LandingPage'
 import Contact from './pages/Contact'
 import Debug from './pages/Debug'
 import Support from './pages/Support'
+import LinkedInSetup from './pages/LinkedInSetup'
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'))
@@ -126,6 +128,7 @@ function App() {
     { path: '/settings', icon: Settings, label: 'Settings', mobileLabel: 'Settings' },
     { path: '/billing', icon: CreditCard, label: 'Billing', mobileLabel: 'Billing' },
     { path: '/support', icon: MessageSquare, label: 'Support', mobileLabel: 'Support' },
+    { path: '/linkedin-setup', icon: AlertCircle, label: 'LinkedIn Setup', mobileLabel: 'LinkedIn', alert: true },
     ...(isAdmin ? [{ path: '/debug', icon: Bug, label: 'Debug', mobileLabel: 'Debug' }] : []),
   ]
 
@@ -153,7 +156,7 @@ function App() {
         </div>
 
         <div className="flex-1 space-y-1 p-4">
-          {nav.map(({ path, icon: Icon, label }) => {
+          {nav.map(({ path, icon: Icon, label, alert }: any) => {
             const isActive = location.pathname === path
             return (
               <Link
@@ -162,13 +165,16 @@ function App() {
                 className={`group relative flex items-center gap-3 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-[0.1em] transition-all duration-200 ${
                   isActive
                     ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.05)]'
+                    : alert
+                    ? 'text-amber-500/70 border border-amber-500/10 bg-amber-500/5 hover:bg-amber-500/10'
                     : 'text-white/40 border border-transparent hover:bg-white/5 hover:text-white/80'
                 }`}
               >
                 <Icon
-                  className={`h-4 w-4 relative z-10 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`}
+                  className={`h-4 w-4 relative z-10 transition-transform duration-200 ${alert ? 'text-amber-500' : isActive ? 'scale-110' : 'group-hover:scale-110'}`}
                 />
                 <span className="relative z-10">{label}</span>
+                {alert && <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[9px] font-black text-black">!</span>}
               </Link>
             )
           })}
@@ -184,26 +190,26 @@ function App() {
           </div>
           <div className="flex flex-col gap-2">
             {[
-              { name: 'StepStone', active: true },
-              { name: 'Xing', active: false },
-              { name: 'Indeed', active: false },
-              { name: 'LinkedIn', active: true },
+              { name: 'StepStone', active: true, disabled: false },
+              { name: 'Xing', active: false, disabled: false },
+              { name: 'Indeed', active: false, disabled: true },
+              { name: 'LinkedIn', active: true, disabled: false },
             ].map((platform) => (
               <div
                 key={platform.name}
-                className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${platform.active ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/[0.02]'}`}
+                className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${platform.disabled ? 'border-white/5 bg-white/[0.01] opacity-40' : platform.active ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/[0.02]'}`}
               >
                 <span
-                  className={`text-[9px] font-bold uppercase tracking-wider ${platform.active ? 'text-amber-500' : 'text-white/40'}`}
+                  className={`text-[9px] font-bold uppercase tracking-wider ${platform.disabled ? 'text-white/20 line-through' : platform.active ? 'text-amber-500' : 'text-white/40'}`}
                 >
                   {platform.name}
                 </span>
                 <div className="relative flex h-2 w-2 items-center justify-center">
-                  {platform.active && (
+                  {platform.active && !platform.disabled && (
                     <div className="absolute h-full w-full animate-ping rounded-full bg-amber-500 opacity-20"></div>
                   )}
                   <div
-                    className={`h-1.5 w-1.5 rounded-full ${platform.active ? 'bg-amber-500' : 'bg-white/20'}`}
+                    className={`h-1.5 w-1.5 rounded-full ${platform.disabled ? 'bg-white/10' : platform.active ? 'bg-amber-500' : 'bg-white/20'}`}
                   ></div>
                 </div>
               </div>
@@ -300,7 +306,7 @@ function App() {
               <div className="flex items-center gap-2 md:gap-3">
                 <CreditCard className="h-4 w-4 shrink-0 text-amber-500" />
                 <span className="text-xs md:text-sm font-bold text-amber-200">
-                  Subscribe to unlock — €8/mo
+                  Subscribe to unlock — €3/mo
                 </span>
               </div>
               <Link
@@ -323,6 +329,7 @@ function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/billing" element={<Billing />} />
             <Route path="/support" element={<Support />} />
+            <Route path="/linkedin-setup" element={<LinkedInSetup />} />
             {isAdmin && <Route path="/debug" element={<Debug />} />}
             <Route path="*" element={<Navigate to="/dashboard" />} />
           </Routes>
