@@ -46,6 +46,8 @@ class RefreshRequest(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: str
+    is_admin: bool = False
+    subscription_status: str = "free"
 
     class Config:
         from_attributes = True

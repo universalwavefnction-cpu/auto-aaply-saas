@@ -35,7 +35,7 @@ def list_jobs(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Job)
+    q = db.query(Job).filter(Job.user_id == user.id)
     if platform:
         q = q.filter(Job.platform == platform.lower())
     if search:

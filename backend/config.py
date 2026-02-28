@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     GMAIL_EMAIL_LI: str = ""
     GMAIL_APP_PASSWORD_LI: str = ""
 
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID: str = ""
+    FRONTEND_URL: str = "https://jobs-autoapply.com"
+
     # Paths
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"
 

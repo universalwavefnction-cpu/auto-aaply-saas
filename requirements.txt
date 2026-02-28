@@ -15,6 +15,7 @@ celery[redis]==5.4.0
 redis==5.1.0
 thefuzz[speedup]==0.22.1
 aiosqlite==0.20.0
+stripe>=9.0.0
 
 # Dev
 ruff>=0.4.0

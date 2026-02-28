@@ -6,9 +6,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .api import applications, auth, bot, dashboard, jobs, profile
+from .api import applications, auth, billing, bot, contact, dashboard, jobs, profile
 from .config import settings
-from .database import init_db
+from .database import init_db, migrate_db
 
 # ── Rate limiter ─────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
@@ -49,6 +49,8 @@ app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(applications.router, prefix="/api/applications", tags=["applications"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(bot.router, prefix="/api/bot", tags=["bot"])
+app.include_router(billing.router, prefix="/api/billing", tags=["billing"])
+app.include_router(contact.router, prefix="/api/contact", tags=["contact"])
 
 # Serve uploaded files (only authenticated users should access in production)
 app.mount("/uploads", StaticFiles(directory=str(settings.UPLOAD_DIR)), name="uploads")
@@ -57,6 +59,7 @@ app.mount("/uploads", StaticFiles(directory=str(settings.UPLOAD_DIR)), name="upl
 @app.on_event("startup")
 def startup():
     init_db()
+    migrate_db()
 
 
 @app.get("/api/health")

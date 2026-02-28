@@ -25,9 +25,26 @@ active_bots: dict[int, BotEngine] = {}
 async def start_bot(
     mode: str = "scrape_and_apply",
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     if user.id in active_bots and active_bots[user.id].running:
         raise HTTPException(400, "Bot is already running")
+
+    # Subscription gate (admins bypass)
+    if not user.is_admin and user.subscription_status != "active":
+        raise HTTPException(403, "Active subscription required to run the bot.")
+
+    # Log the CV that will be used (for debugging)
+    from ..models import CVFile, JobFilter
+
+    jf = db.query(JobFilter).filter(JobFilter.user_id == user.id).first()
+    cv_info = "none"
+    if jf and jf.selected_cv_id:
+        cv = db.query(CVFile).filter(CVFile.id == jf.selected_cv_id).first()
+        cv_info = f"id={jf.selected_cv_id} label={cv.label}" if cv else f"id={jf.selected_cv_id} (missing)"
+    import logging
+
+    logging.getLogger("bot").info(f"Bot start: user={user.id} mode={mode} cv={cv_info}")
 
     engine = BotEngine(user.id)
     active_bots[user.id] = engine
@@ -39,6 +56,7 @@ async def start_bot(
         "status": "started",
         "session_id": engine.session_id,
         "mode": mode,
+        "cv": cv_info,
     }
 
 
@@ -145,40 +163,50 @@ def list_sessions(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List all bot sessions with summary stats."""
+    """List all bot sessions with summary stats. Admins see all users."""
+    q = db.query(
+        BotLog.session_id,
+        BotLog.user_id,
+        func.min(BotLog.timestamp).label("started_at"),
+        func.max(BotLog.timestamp).label("ended_at"),
+        func.count(BotLog.id).label("log_count"),
+    )
+    if not user.is_admin:
+        q = q.filter(BotLog.user_id == user.id)
     sessions = (
-        db.query(
-            BotLog.session_id,
-            func.min(BotLog.timestamp).label("started_at"),
-            func.max(BotLog.timestamp).label("ended_at"),
-            func.count(BotLog.id).label("log_count"),
-        )
-        .filter(BotLog.user_id == user.id)
-        .group_by(BotLog.session_id)
+        q.group_by(BotLog.session_id, BotLog.user_id)
         .order_by(desc(func.min(BotLog.timestamp)))
-        .limit(50)
+        .limit(100)
         .all()
     )
 
+    # Cache user emails for admin view
+    user_emails = {}
+    if user.is_admin:
+        user_ids = {s.user_id for s in sessions}
+        users = db.query(User).filter(User.id.in_(user_ids)).all()
+        user_emails = {u.id: u.email for u in users}
+
     result = []
     for s in sessions:
-        # Get session stats from the session_end log
         end_log = db.query(BotLog).filter(BotLog.session_id == s.session_id, BotLog.event == "session_end").first()
         stats = end_log.data.get("stats", {}) if end_log and end_log.data else {}
 
-        result.append(
-            {
-                "session_id": s.session_id,
-                "started_at": s.started_at.isoformat() if s.started_at else None,
-                "ended_at": s.ended_at.isoformat() if s.ended_at else None,
-                "log_count": s.log_count,
-                "applied": stats.get("applied", 0),
-                "failed": stats.get("failed", 0),
-                "skipped": stats.get("skipped", 0),
-                "fields_filled": stats.get("fields_filled", 0),
-                "fields_total": stats.get("fields_total", 0),
-            }
-        )
+        entry = {
+            "session_id": s.session_id,
+            "started_at": s.started_at.isoformat() if s.started_at else None,
+            "ended_at": s.ended_at.isoformat() if s.ended_at else None,
+            "log_count": s.log_count,
+            "applied": stats.get("applied", 0),
+            "failed": stats.get("failed", 0),
+            "skipped": stats.get("skipped", 0),
+            "fields_filled": stats.get("fields_filled", 0),
+            "fields_total": stats.get("fields_total", 0),
+        }
+        if user.is_admin:
+            entry["user_id"] = s.user_id
+            entry["user_email"] = user_emails.get(s.user_id, "unknown")
+        result.append(entry)
 
     return {"sessions": result}
 
@@ -192,8 +220,10 @@ def get_logs(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get detailed logs, optionally filtered."""
-    q = db.query(BotLog).filter(BotLog.user_id == user.id)
+    """Get detailed logs, optionally filtered. Admins see all users."""
+    q = db.query(BotLog)
+    if not user.is_admin:
+        q = q.filter(BotLog.user_id == user.id)
     if session_id:
         q = q.filter(BotLog.session_id == session_id)
     if level:
@@ -226,26 +256,22 @@ def log_analytics(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Aggregate analytics across all sessions."""
-    total_sessions = db.query(func.count(func.distinct(BotLog.session_id))).filter(BotLog.user_id == user.id).scalar()
+    """Aggregate analytics across all sessions. Admins see all users."""
+    def _q():
+        q = db.query(func.count(BotLog.id))
+        if not user.is_admin:
+            q = q.filter(BotLog.user_id == user.id)
+        return q
 
-    total_fields_filled = (
-        db.query(func.count(BotLog.id)).filter(BotLog.user_id == user.id, BotLog.event == "field_filled").scalar()
-    )
+    total_sessions_q = db.query(func.count(func.distinct(BotLog.session_id)))
+    if not user.is_admin:
+        total_sessions_q = total_sessions_q.filter(BotLog.user_id == user.id)
+    total_sessions = total_sessions_q.scalar()
 
-    total_fields_skipped = (
-        db.query(func.count(BotLog.id)).filter(BotLog.user_id == user.id, BotLog.event == "field_skipped").scalar()
-    )
-
-    total_applies = (
-        db.query(func.count(BotLog.id)).filter(BotLog.user_id == user.id, BotLog.event == "success").scalar()
-    )
-
-    total_failures = (
-        db.query(func.count(BotLog.id))
-        .filter(BotLog.user_id == user.id, BotLog.event.in_(["no_fields_matched", "error", "no_button"]))
-        .scalar()
-    )
+    total_fields_filled = _q().filter(BotLog.event == "field_filled").scalar()
+    total_fields_skipped = _q().filter(BotLog.event == "field_skipped").scalar()
+    total_applies = _q().filter(BotLog.event == "success").scalar()
+    total_failures = _q().filter(BotLog.event.in_(["no_fields_matched", "error", "no_button"])).scalar()
 
     fill_rate = (total_fields_filled / max(total_fields_filled + total_fields_skipped, 1)) * 100
 
@@ -264,15 +290,11 @@ def unmatched_fields(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List form field labels that couldn't be matched — tells you what Q&A to add."""
-    logs = (
-        db.query(BotLog)
-        .filter(
-            BotLog.user_id == user.id,
-            BotLog.event == "field_skipped",
-        )
-        .all()
-    )
+    """List form field labels that couldn't be matched. Admins see all users."""
+    q = db.query(BotLog).filter(BotLog.event == "field_skipped")
+    if not user.is_admin:
+        q = q.filter(BotLog.user_id == user.id)
+    logs = q.all()
 
     # Count frequency of each unmatched label
     label_counts: dict[str, int] = {}

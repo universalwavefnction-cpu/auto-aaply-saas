@@ -23,3 +23,28 @@ def init_db():
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+
+
+def migrate_db():
+    """Add missing columns to existing tables (SQLite-safe, idempotent)."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(users)"))}
+        additions = [
+            ("is_admin", "BOOLEAN DEFAULT 0 NOT NULL"),
+            ("subscription_status", "VARCHAR DEFAULT 'free' NOT NULL"),
+            ("stripe_customer_id", "VARCHAR"),
+            ("stripe_subscription_id", "VARCHAR"),
+            ("subscription_ends_at", "DATETIME"),
+        ]
+        for col, definition in additions:
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {definition}"))
+
+        # Jobs table: add user_id
+        job_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(jobs)"))}
+        if "user_id" not in job_cols:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN user_id INTEGER REFERENCES users(id)"))
+
+        conn.commit()

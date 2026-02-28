@@ -33,11 +33,15 @@ export const api = {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `username=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
     })
-    const data = await res.json()
-    if (data.refresh_token) {
-      localStorage.setItem('refresh_token', data.refresh_token)
+    if (!res.ok) {
+      const text = await res.text()
+      try {
+        return JSON.parse(text)
+      } catch {
+        return { detail: `Login failed (${res.status})` }
+      }
     }
-    return data
+    return res.json()
   },
   register: async (email: string, password: string) => {
     const data = await request('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) })
@@ -119,4 +123,17 @@ export const api = {
     request(`/bot/logs${sessionId ? `?session_id=${sessionId}` : ''}`),
   getBotAnalytics: () => request('/bot/logs/analytics'),
   getUnmatchedFields: () => request('/bot/logs/unmatched-fields'),
+
+  // Contact (public, no auth)
+  submitContact: (data: { name: string; email: string; subject: string; message: string }) =>
+    fetch(`${BASE}/contact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }).then((r) => r.json()),
+
+  // Billing
+  getBillingStatus: () => request('/billing/status'),
+  createCheckoutSession: () => request('/billing/checkout-session', { method: 'POST' }),
+  createPortalSession: () => request('/billing/portal', { method: 'POST' }),
 }

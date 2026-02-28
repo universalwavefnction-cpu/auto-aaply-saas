@@ -14,6 +14,15 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Role
+    is_admin = Column(Boolean, default=False, nullable=False)
+
+    # Subscription
+    subscription_status = Column(String, default="free", nullable=False)
+    stripe_customer_id = Column(String, nullable=True, unique=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    subscription_ends_at = Column(DateTime, nullable=True)
+
     profile = relationship("Profile", back_populates="user", uselist=False)
     credentials = relationship("PlatformCredential", back_populates="user")
     applications = relationship("Application", back_populates="user")
@@ -69,6 +78,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     platform = Column(String, index=True)
     external_id = Column(String, index=True)
     title = Column(String, nullable=False)
