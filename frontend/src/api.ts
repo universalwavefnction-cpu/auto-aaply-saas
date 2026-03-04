@@ -96,9 +96,16 @@ export const api = {
     return request(`/jobs?${qs}`)
   },
   getJob: (id: number) => request(`/jobs/${id}`),
+  getJobFacets: () => request('/jobs/facets'),
   getFilters: () => request('/jobs/filters/current'),
   updateFilters: (data: any) =>
     request('/jobs/filters', { method: 'PUT', body: JSON.stringify(data) }),
+  discoverJobs: (opts?: { platforms?: string[]; query?: string; location?: string }) =>
+    request('/jobs/discover', {
+      method: 'POST',
+      body: JSON.stringify(opts || {}),
+    }),
+  discoveryStatus: () => request('/jobs/discover/status'),
 
   // Applications
   getApplications: (params: Record<string, any> = {}) => {
@@ -109,6 +116,10 @@ export const api = {
     request(`/applications/${id}/response`, { method: 'POST', body: JSON.stringify(data) }),
   manualApply: (data: any) =>
     request('/applications/manual', { method: 'POST', body: JSON.stringify(data) }),
+  searchApplications: (company?: string) =>
+    request(`/applications/search${company ? `?company=${encodeURIComponent(company)}` : ''}`),
+  batchUpdateResponses: (updates: { id: number; response_status?: string; notes?: string }[]) =>
+    request('/applications/batch-response', { method: 'POST', body: JSON.stringify(updates) }),
 
   // Dashboard
   getStats: () => request('/dashboard/stats'),

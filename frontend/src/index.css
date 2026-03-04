@@ -49,6 +49,63 @@ body {
   animation: fadeIn 0.3s ease-out forwards;
 }
 
+/* Demo Tour Animations */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  50% { opacity: 1; box-shadow: 0 0 20px 4px rgba(245, 158, 11, 0.3); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes blinkCursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.demo-slide-right {
+  animation: slideInRight 0.35s ease-out forwards;
+}
+
+.demo-slide-left {
+  animation: slideInLeft 0.35s ease-out forwards;
+}
+
+.demo-hotspot {
+  position: relative;
+}
+.demo-hotspot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 16px;
+  border: 2px solid rgba(245, 158, 11, 0.5);
+  pointer-events: none;
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.demo-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: #f59e0b;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blinkCursor 0.8s step-end infinite;
+}
+
 /* --- Light Theme Overrides --- */
 html[data-theme="light"] body {
   background: linear-gradient(180deg, #f5f7fa 0%, #eef1f5 100%);

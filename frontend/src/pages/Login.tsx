@@ -1,11 +1,13 @@
 import React, { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Sparkles, Lock, Mail, ArrowRight, UserPlus, LogIn } from 'lucide-react'
 import { api } from '../api'
 
 export default function Login({ onLogin }: { onLogin: (token: string) => void }) {
+  const [searchParams] = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isRegister, setIsRegister] = useState(false)
+  const [isRegister, setIsRegister] = useState(searchParams.get('register') === '1')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,6 +20,9 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
         ? await api.register(email, password)
         : await api.login(email, password)
       if (res.access_token) {
+        if (isRegister) {
+          gtag('event', 'sign_up', { method: 'email' })
+        }
         onLogin(res.access_token)
       } else {
         setError(res.detail || 'Authentication failed')

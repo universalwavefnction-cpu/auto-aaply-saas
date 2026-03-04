@@ -1,9 +1,20 @@
 import { useState, useEffect } from 'react'
-import { Settings, Save, Bot, Target, MapPin, Building2, AlertTriangle, Zap, CheckCircle2 } from 'lucide-react'
+import { Settings, Save, Bot, Target, MapPin, Building2, AlertTriangle, Zap, CheckCircle2, Radar } from 'lucide-react'
 import { api } from '../api'
 
+const DISCOVERY_PLATFORMS = [
+  { id: 'arbeitsagentur', label: 'Arbeitsagentur', desc: 'Largest German job database (free)', free: true },
+  { id: 'linkedin_guest', label: 'LinkedIn', desc: 'No login needed for discovery (free)', free: true },
+  { id: 'arbeitnow', label: 'Arbeitnow', desc: 'English jobs in Germany (free)', free: true },
+  { id: 'indeed', label: 'Indeed', desc: 'Via mobile API, bypasses Cloudflare (free)', free: true },
+  { id: 'jooble', label: 'Jooble', desc: 'Aggregator, needs API key in .env', free: false },
+  { id: 'adzuna', label: 'Adzuna', desc: 'DE/AT/CH, needs API key in .env', free: false },
+  { id: 'stepstone', label: 'StepStone', desc: 'Requires credentials (browser)', free: false },
+  { id: 'xing', label: 'Xing', desc: 'Requires credentials (browser)', free: false },
+]
+
 export default function SettingsPage() {
-  const [filters, setFilters] = useState<any>({ job_titles: [], locations: [], remote_only: false, min_salary: 0, max_salary: 0, blacklist_companies: [], blacklist_keywords: [], autopilot_enabled: false })
+  const [filters, setFilters] = useState<any>({ job_titles: [], locations: [], remote_only: false, min_salary: 0, max_salary: 0, blacklist_companies: [], blacklist_keywords: [], autopilot_enabled: false, scrape_platforms: ['arbeitsagentur', 'linkedin_guest', 'arbeitnow'] })
   const [saved, setSaved] = useState(false)
   const [inputs, setInputs] = useState({ title: '', location: '', company: '', keyword: '' })
   const [loading, setLoading] = useState(true)
@@ -39,7 +50,7 @@ export default function SettingsPage() {
   )
 
   if (loading) return (
-    <div className="space-y-8 p-8 max-w-4xl mx-auto">
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
       <div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-xl bg-white/5 shimmer"></div><div className="space-y-2"><div className="h-6 w-32 rounded bg-white/5 shimmer"></div><div className="h-3 w-24 rounded bg-white/5 shimmer"></div></div></div><div className="h-10 w-32 rounded-xl bg-white/5 shimmer"></div></div>
       <div className="h-32 rounded-2xl bg-white/5 shimmer"></div>
       <div className="grid gap-8 md:grid-cols-2"><div className="h-64 rounded-2xl bg-white/5 shimmer"></div><div className="h-64 rounded-2xl bg-white/5 shimmer"></div></div>
@@ -47,8 +58,8 @@ export default function SettingsPage() {
   )
 
   return (
-    <div className="space-y-8 p-8 max-w-4xl mx-auto relative">
-      <div className={`fixed top-8 right-8 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl backdrop-blur-md transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0 pointer-events-none'}`}><CheckCircle2 className="h-4 w-4" />{toast.msg}</div>
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-4xl mx-auto relative">
+      <div className={`fixed top-[60px] md:top-8 right-4 sm:right-8 left-4 sm:left-auto z-50 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl backdrop-blur-md transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0 pointer-events-none'}`}><CheckCircle2 className="h-4 w-4" />{toast.msg}</div>
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -92,6 +103,33 @@ export default function SettingsPage() {
             <div className={`h-4 w-4 rounded-full bg-white shadow-md transition-transform duration-300 ${filters.remote_only ? 'translate-x-6' : 'translate-x-0'}`} />
           </button>
           <div><span className="text-sm font-bold text-white">Remote Only</span><p className="text-[10px] text-white/40">Only apply to positions explicitly marked as remote</p></div>
+        </div>
+      </div>
+
+      {/* Discovery Platforms */}
+      <div className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-8 shadow-2xl transition-all hover:border-white/20">
+        <div className="mb-6 flex items-center gap-3 border-b border-white/5 pb-4"><Radar className="h-5 w-5 text-white/40" /><h2 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/60">Discovery Platforms</h2></div>
+        <p className="mb-4 text-xs text-white/30">Select which platforms to scan when you click "Discover Jobs"</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {DISCOVERY_PLATFORMS.map((p) => {
+            const checked = (filters.scrape_platforms || []).includes(p.id)
+            return (
+              <button key={p.id} onClick={() => {
+                const current = filters.scrape_platforms || []
+                const next = checked ? current.filter((x: string) => x !== p.id) : [...current, p.id]
+                setFilters({ ...filters, scrape_platforms: next })
+              }} className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-all ${checked ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-black/30 hover:border-white/20'}`}>
+                <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${checked ? 'border-amber-500 bg-amber-500' : 'border-white/20 bg-black/50'}`}>
+                  {checked && <svg className="h-3 w-3 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                </div>
+                <div>
+                  <span className={`text-sm font-bold ${checked ? 'text-amber-500' : 'text-white/60'}`}>{p.label}</span>
+                  {p.free && <span className="ml-2 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-emerald-400 border border-emerald-500/20">Free</span>}
+                  <p className="mt-0.5 text-[10px] text-white/30">{p.desc}</p>
+                </div>
+              </button>
+            )
+          })}
         </div>
       </div>
 

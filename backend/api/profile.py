@@ -1,6 +1,8 @@
+import os
 import shutil
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -135,6 +137,20 @@ def list_cvs(user: User = Depends(get_current_user), db: Session = Depends(get_d
         }
         for c in cvs
     ]
+
+
+@router.get("/cv/{cv_id}/download")
+def download_cv(cv_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cv = db.query(CVFile).filter(CVFile.id == cv_id, CVFile.user_id == user.id).first()
+    if not cv:
+        raise HTTPException(404, "CV not found")
+    if not cv.file_path or not os.path.exists(cv.file_path):
+        raise HTTPException(404, "CV file not found on disk")
+    return FileResponse(
+        cv.file_path,
+        filename=cv.original_filename or os.path.basename(cv.file_path),
+        media_type="application/octet-stream",
+    )
 
 
 @router.delete("/cv/{cv_id}")

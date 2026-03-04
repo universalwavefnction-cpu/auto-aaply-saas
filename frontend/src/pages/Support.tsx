@@ -30,7 +30,7 @@ export default function Support() {
   }
 
   return (
-    <div className="space-y-8 p-8 max-w-2xl mx-auto">
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-2xl mx-auto">
       <div className="flex items-center gap-3">
         <div className="rounded-xl bg-amber-500/10 p-2 border border-amber-500/20">
           <MessageSquare className="h-5 w-5 text-amber-500" />

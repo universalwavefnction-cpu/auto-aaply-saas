@@ -17,6 +17,12 @@ class ResponseUpdate(BaseModel):
     notes: str | None = None
 
 
+class BatchResponseItem(BaseModel):
+    id: int
+    response_status: str | None = None
+    notes: str | None = None
+
+
 class ManualApplication(BaseModel):
     job_id: int | None = None
     platform: str = "manual"
@@ -70,6 +76,62 @@ def list_applications(
             for a in apps
         ],
     }
+
+
+@router.get("/search")
+def search_applications(
+    company: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Search applications by company name (for Chrome extension matching)."""
+    q = db.query(Application).filter(
+        Application.user_id == user.id,
+        Application.status.in_(["success", "pending", "applying"]),
+    )
+    if company:
+        q = q.filter(Application.company.ilike(f"%{company}%"))
+
+    apps = q.order_by(desc(Application.applied_at)).limit(200).all()
+    return [
+        {
+            "id": a.id,
+            "company": a.company,
+            "job_title": a.job_title,
+            "platform": a.platform,
+            "status": a.status,
+            "response_status": a.response_status,
+            "applied_at": a.applied_at.isoformat() if a.applied_at else None,
+        }
+        for a in apps
+    ]
+
+
+@router.post("/batch-response")
+def batch_update_responses(
+    updates: list[BatchResponseItem],
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Batch update response statuses (for Chrome extension sync)."""
+    results = []
+    for update in updates[:50]:
+        app = (
+            db.query(Application)
+            .filter(Application.id == update.id, Application.user_id == user.id)
+            .first()
+        )
+        if app:
+            if update.response_status:
+                app.response_status = update.response_status
+            if update.notes:
+                existing = app.notes or ""
+                app.notes = f"{existing}\n{update.notes}".strip()
+            results.append({"id": app.id, "status": "updated"})
+        else:
+            results.append({"id": update.id, "status": "not_found"})
+    db.commit()
+    return {"results": results}
 
 
 @router.post("/{app_id}/response")

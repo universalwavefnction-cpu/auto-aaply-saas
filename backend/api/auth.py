@@ -63,7 +63,12 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
 
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(email=req.email, password_hash=hash_password(req.password))
+
+    # Pre-approved free users — get active subscription on registration
+    free_emails = {"qqgaojinhui@gmail.com", "robin.wilzeck27@gmail.com", "summer.wind@live.de"}
+    sub_status = "active" if req.email.lower() in free_emails else "free"
+
+    user = User(email=req.email, password_hash=hash_password(req.password), subscription_status=sub_status)
     db.add(user)
     db.flush()
     # Create empty profile and filter

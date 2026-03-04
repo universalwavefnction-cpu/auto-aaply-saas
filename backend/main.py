@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -52,8 +51,6 @@ app.include_router(bot.router, prefix="/api/bot", tags=["bot"])
 app.include_router(billing.router, prefix="/api/billing", tags=["billing"])
 app.include_router(contact.router, prefix="/api/contact", tags=["contact"])
 
-# Serve uploaded files (only authenticated users should access in production)
-app.mount("/uploads", StaticFiles(directory=str(settings.UPLOAD_DIR)), name="uploads")
 
 
 @app.on_event("startup")

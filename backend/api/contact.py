@@ -2,12 +2,12 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-
-from ..database import SessionLocal, Base, engine
 from sqlalchemy import Column, DateTime, Integer, String, Text
+
+from ..database import Base, SessionLocal, engine
 
 logger = logging.getLogger(__name__)
 

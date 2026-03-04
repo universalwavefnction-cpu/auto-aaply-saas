@@ -105,6 +105,14 @@ class Job(Base):
     scraped_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     raw_data = Column(JSON)
 
+    # Discovery fields
+    employment_type = Column(String)  # full-time, part-time, contract, mini-job
+    posted_at = Column(DateTime)  # original posting date from platform
+    source_id = Column(String, index=True)  # platform's native job ID
+    description_hash = Column(String, index=True)  # SHA256 for cross-platform dedup
+    salary_text = Column(String)  # raw salary string e.g. "60.000-80.000 EUR"
+    platforms_seen = Column(JSON)  # ["stepstone", "arbeitsagentur"] for dedup tracking
+
     applications = relationship("Application", back_populates="job")
 
 
@@ -144,6 +152,7 @@ class JobFilter(Base):
     blacklist_keywords = Column(JSON, default=list)
     autopilot_enabled = Column(Boolean, default=False)
     platform = Column(String, default="stepstone")  # "stepstone" or "xing"
+    scrape_platforms = Column(JSON, default=list)  # ["arbeitsagentur", "linkedin_guest", "arbeitnow"]
     max_applications = Column(Integer, default=10)  # 1-50
     selected_cv_id = Column(Integer, ForeignKey("cv_files.id"), nullable=True)
 

@@ -1,15 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Sparkles,
   ArrowRight,
-  Upload,
-  Target,
-  Bot,
-  LogIn,
-  UserCircle,
-  MailCheck,
-  ExternalLink,
   Shield,
   Monitor,
   BriefcaseBusiness,
@@ -20,6 +13,16 @@ import {
   Globe,
   Mail,
   MessageSquare,
+  Terminal,
+  CheckCircle2,
+  AlertCircle,
+  Activity,
+  Send,
+  MousePointer2,
+  Camera,
+  Briefcase,
+  MapPin,
+  Rocket,
 } from 'lucide-react'
 
 const t = {
@@ -31,7 +34,7 @@ const t = {
     heroH1Span: 'while you sleep.',
     heroP:
       'AutoApply scans StepStone and LinkedIn for your target roles and submits applications automatically — CV, cover letter, and all form fields handled.',
-    ctaMain: 'Start applying — €3/mo',
+    ctaMain: 'Start applying — €8/mo',
     ctaSecondary: 'See how it works',
     trusted: 'Trusted by job seekers across Germany',
     howLabel: 'How it works',
@@ -116,7 +119,7 @@ const t = {
     heroH1Span: 'während du schläfst.',
     heroP:
       'AutoApply durchsucht StepStone und LinkedIn nach passenden Stellen und verschickt Bewerbungen automatisch — Lebenslauf, Anschreiben und alle Formularfelder inklusive.',
-    ctaMain: 'Jetzt bewerben — 3 €/Monat',
+    ctaMain: 'Jetzt bewerben — 8 €/Monat',
     ctaSecondary: 'So funktioniert es',
     trusted: 'Vertraut von Jobsuchenden in ganz Deutschland',
     howLabel: 'So funktioniert es',
@@ -197,6 +200,218 @@ const t = {
 
 type Lang = keyof typeof t
 
+const TERMINAL_LINES = [
+  { event: 'start', msg: 'Bot initialized — scanning StepStone...' },
+  { event: 'search', msg: 'Searching: "Frontend Engineer" in Berlin' },
+  { event: 'found', msg: 'Found 23 matching jobs on page 1' },
+  { event: 'open', msg: 'Opening: Frontend Developer at SAP SE' },
+  { event: 'field_filled', msg: 'Filling: First Name → Max' },
+  { event: 'field_filled', msg: 'Filling: Last Name → Mustermann' },
+  { event: 'field_filled', msg: 'Filling: Email → m.mustermann@email.de' },
+  { event: 'upload', msg: 'Uploading CV: resume.pdf' },
+  { event: 'field_filled', msg: 'Generating cover letter with AI...' },
+  { event: 'clicking_apply', msg: 'Clicking submit...' },
+  { event: 'success', msg: 'SUCCESS — Application sent to SAP SE' },
+  { event: 'open', msg: 'Opening: React Engineer at Zalando SE' },
+  { event: 'field_filled', msg: 'Filling: First Name → Max' },
+  { event: 'field_filled', msg: 'Filling: Availability → Immediately' },
+  { event: 'upload', msg: 'Uploading CV: resume.pdf' },
+  { event: 'clicking_apply', msg: 'Clicking submit...' },
+  { event: 'success', msg: 'SUCCESS — Application sent to Zalando SE' },
+  { event: 'open', msg: 'Opening: Software Engineer at Siemens AG' },
+  { event: 'field_filled', msg: 'Filling: Phone → +49 171 234 5678' },
+  { event: 'field_filled', msg: 'Filling: Salary → 65,000 €' },
+  { event: 'clicking_apply', msg: 'Clicking submit...' },
+  { event: 'success', msg: 'SUCCESS — Application sent to Siemens AG' },
+]
+
+function TerminalDemo() {
+  const [lines, setLines] = useState(0)
+  const [started, setStarted] = useState(false)
+  const logRef = useRef<HTMLDivElement>(null)
+
+  const handleLaunch = () => {
+    if (started) return
+    setStarted(true)
+    setLines(0)
+  }
+
+  // Type lines one by one
+  useEffect(() => {
+    if (!started) return
+    const timer = setInterval(() => {
+      setLines((v) => {
+        if (v >= TERMINAL_LINES.length) {
+          clearInterval(timer)
+          return v
+        }
+        return v + 1
+      })
+    }, 500)
+    return () => clearInterval(timer)
+  }, [started])
+
+  // Auto-scroll
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [lines])
+
+  const applied = TERMINAL_LINES.slice(0, lines).filter((l) => l.event === 'success').length
+  const total = 23
+  const progress = (applied / total) * 100
+
+  const eventIcon = (event: string) => {
+    switch (event) {
+      case 'success': return <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+      case 'field_filled': return <div className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      case 'upload': return <Camera className="h-3 w-3 text-blue-400" />
+      case 'clicking_apply': return <MousePointer2 className="h-3 w-3 text-purple-400" />
+      case 'open': return <Send className="h-3 w-3 text-amber-400" />
+      default: return <div className="h-1 w-1 rounded-full bg-white/20" />
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Search bar + Launch */}
+      <div className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1 flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-4 py-3">
+            <Briefcase className="h-4 w-4 text-white/30 shrink-0" />
+            <span className="text-sm text-white/70">Frontend Engineer</span>
+          </div>
+          <div className="sm:w-40 flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-4 py-3">
+            <MapPin className="h-4 w-4 text-white/30 shrink-0" />
+            <span className="text-sm text-white/70">Berlin</span>
+          </div>
+          <button
+            onClick={handleLaunch}
+            className={`group relative overflow-hidden rounded-xl px-6 py-3 text-xs font-black uppercase tracking-wider transition-all ${
+              started
+                ? 'bg-amber-500/20 text-amber-500 border border-amber-500/20 cursor-default'
+                : 'bg-amber-500 text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-amber-400 hover:scale-[1.02] active:scale-[0.98]'
+            }`}
+          >
+            {!started && (
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+            )}
+            <span className="relative flex items-center gap-2">
+              {started ? (
+                <>
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+                  Running
+                </>
+              ) : (
+                <>
+                  Launch
+                  <Rocket className="h-3.5 w-3.5" />
+                </>
+              )}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="rounded-2xl border border-white/10 bg-[#0A0A0A] p-4 sm:p-6">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-white/40" />
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
+              Execution Progress
+            </span>
+          </div>
+          <div className="flex gap-4 sm:gap-6 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
+            <span className="flex items-center gap-1.5 text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" /> {applied}
+            </span>
+            <span className="flex items-center gap-1.5 text-white/40">
+              <AlertCircle className="h-3 w-3" /> {applied}/{total}
+            </span>
+          </div>
+        </div>
+        <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-white/5">
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-amber-500 to-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.5)] transition-all duration-700 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Terminal */}
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/5 px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1.5">
+              <div className="h-3 w-3 rounded-full bg-red-500/60"></div>
+              <div className="h-3 w-3 rounded-full bg-amber-500/60"></div>
+              <div className="h-3 w-3 rounded-full bg-emerald-500/60"></div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Terminal className="h-3.5 w-3.5 text-white/40" />
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
+                AutoApply Terminal
+              </span>
+            </div>
+          </div>
+          {started && lines > 0 && (
+            <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1 border border-amber-500/20">
+              <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"></div>
+              <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest text-amber-500">
+                Live
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div
+          ref={logRef}
+          className="h-[320px] sm:h-[380px] overflow-auto p-4 sm:p-6 font-mono text-[10px] sm:text-[11px] space-y-1.5 custom-scrollbar"
+        >
+          {TERMINAL_LINES.slice(0, lines).map((line, i) => (
+            <div
+              key={i}
+              className={`flex items-start gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 fadeIn ${
+                line.event === 'success'
+                  ? 'bg-emerald-500/5 border border-emerald-500/10'
+                  : 'border border-transparent'
+              }`}
+            >
+              <span className="mt-0.5 w-12 sm:w-16 shrink-0 tabular-nums text-white/20">
+                {`14:${String(30 + Math.floor(i / 3)).padStart(2, '0')}:${String((i * 7) % 60).padStart(2, '0')}`}
+              </span>
+              <span className="mt-1 flex w-4 shrink-0 justify-center">
+                {eventIcon(line.event)}
+              </span>
+              <span
+                className={`break-all leading-relaxed ${
+                  line.event === 'success' ? 'text-emerald-400 font-bold' : 'text-white/60'
+                }`}
+              >
+                {line.msg}
+              </span>
+            </div>
+          ))}
+          {started && lines < TERMINAL_LINES.length && (
+            <div className="flex items-center gap-2 px-3 py-2">
+              <div className="h-3.5 w-1.5 animate-pulse bg-amber-500 rounded-sm" />
+              <span className="text-[10px] text-white/20">Processing...</span>
+            </div>
+          )}
+          {!started && (
+            <div className="flex h-full flex-col items-center justify-center text-white/15">
+              <Terminal className="mb-3 h-10 w-10 opacity-30" />
+              <p className="text-[10px] font-black uppercase tracking-[0.2em]">
+                Hit Launch to start
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function LandingPage() {
   const navigate = useNavigate()
   const [lang, setLang] = useState<Lang>(() => {
@@ -212,7 +427,6 @@ export default function LandingPage() {
   }
 
   const l = t[lang]
-  const stepIcons = [LogIn, UserCircle, Upload, Bot, MailCheck, ExternalLink]
   const featIcons = [BriefcaseBusiness, Sparkles, FileText, Monitor, Ban, Shield]
 
   return (
@@ -245,7 +459,7 @@ export default function LandingPage() {
               {l.signIn}
             </button>
             <button
-              onClick={() => navigate('/login?register=1')}
+              onClick={() => navigate('/demo')}
               className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold uppercase tracking-wider text-black transition-colors hover:bg-amber-400"
             >
               {l.getStarted}
@@ -274,7 +488,7 @@ export default function LandingPage() {
 
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
           <button
-            onClick={() => navigate('/login?register=1')}
+            onClick={() => navigate('/demo')}
             className="group relative flex items-center gap-2 overflow-hidden rounded-xl bg-amber-500 px-8 py-4 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_30px_rgba(245,158,11,0.3)] transition-all hover:bg-amber-400 hover:shadow-[0_0_40px_rgba(245,158,11,0.4)]"
           >
             <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
@@ -294,41 +508,19 @@ export default function LandingPage() {
         </p>
       </section>
 
-      {/* How it works */}
-      <section id="how-it-works" className="relative z-10 border-t border-white/5 py-24">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-16 text-center">
+      {/* How it works — Live Terminal Demo */}
+      <section id="how-it-works" className="relative z-10 border-t border-white/5 py-16 sm:py-24">
+        <div className="mx-auto max-w-4xl px-4 sm:px-6">
+          <div className="mb-10 sm:mb-16 text-center">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
               {l.howLabel}
             </span>
-            <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl">{l.howH2}</h2>
+            <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl">
+              {lang === 'de' ? 'Sieh dem Bot bei der Arbeit zu.' : 'Watch the bot work.'}
+            </h2>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
-            {l.steps.map(({ title, desc }, i) => {
-              const Icon = stepIcons[i]
-              const step = String(i + 1).padStart(2, '0')
-              return (
-                <div
-                  key={step}
-                  className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-8 transition-colors hover:border-white/10"
-                >
-                  <span className="text-[10px] font-black tracking-widest text-amber-500/50">
-                    STEP {step}
-                  </span>
-                  <div className="mt-4 mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20">
-                    <Icon className="h-6 w-6 text-amber-500" />
-                  </div>
-                  <h3 className="mb-2 text-lg font-bold">{title}</h3>
-                  <p className="text-sm leading-relaxed text-white/40">{desc}</p>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="mt-10 rounded-xl border border-amber-500/20 bg-amber-500/5 px-6 py-4 text-center">
-            <p className="text-sm font-bold text-amber-300">{l.howNote}</p>
-          </div>
+          <TerminalDemo />
         </div>
       </section>
 
@@ -374,7 +566,7 @@ export default function LandingPage() {
 
           <div className="rounded-2xl border border-amber-500/20 bg-[#0A0A0A] p-8 shadow-[0_0_40px_rgba(245,158,11,0.05)]">
             <div className="mb-6">
-              <span className="text-5xl font-black">€3</span>
+              <span className="text-5xl font-black">€8</span>
               <span className="text-lg text-white/40">
                 {' '}
                 / {lang === 'de' ? 'Monat' : 'month'}
@@ -391,7 +583,7 @@ export default function LandingPage() {
             </ul>
 
             <button
-              onClick={() => navigate('/login?register=1')}
+              onClick={() => navigate('/demo')}
               className="group relative w-full overflow-hidden rounded-xl bg-amber-500 py-4 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] transition-all hover:bg-amber-400"
             >
               <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />

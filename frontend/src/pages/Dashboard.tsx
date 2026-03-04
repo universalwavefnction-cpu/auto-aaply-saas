@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import {
   Rocket,
   Activity,
-  Target,
   CheckCircle2,
   MessageSquare,
   Briefcase,
   MapPin,
   Globe,
   SlidersHorizontal,
-  FileText
+  FileText,
+  ArrowRight,
 } from 'lucide-react'
 import { api } from '../api'
 
-export default function Dashboard() {
+export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
   const [stats, setStats] = useState<any>(null)
   const [jobTitle, setJobTitle] = useState('')
   const [location, setLocation] = useState('')
@@ -26,6 +26,18 @@ export default function Dashboard() {
   const navigate = useNavigate()
 
   useEffect(() => {
+    if (isGuest) {
+      // Show demo data for guests
+      setStats({
+        total_applications: 0,
+        success_rate: 0,
+        by_response: {},
+        by_platform: { stepstone: 0, linkedin: 0 },
+        by_status: {},
+        recent: [],
+      })
+      return
+    }
     api.getStats().then(setStats)
     api.listCVs().then((res) => {
       if (Array.isArray(res)) setCvs(res)
@@ -40,7 +52,7 @@ export default function Dashboard() {
         if (f.selected_cv_id) setSelectedCv(f.selected_cv_id)
       }
     })
-  }, [])
+  }, [isGuest])
 
   const launch = async () => {
     if (!jobTitle.trim()) return
@@ -73,15 +85,7 @@ export default function Dashboard() {
       bg: 'bg-emerald-500/10',
       border: 'border-emerald-500/20'
     },
-    {
-      label: 'Jobs Discovered',
-      val: stats?.total_jobs_discovered?.toLocaleString() || '0',
-      accent: 'text-blue-400',
-      icon: Target,
-      bg: 'bg-blue-500/10',
-      border: 'border-blue-500/20'
-    },
-    {
+{
       label: 'Responses',
       val: stats ? Object.entries(stats.by_response || {})
         .filter(([k]) => k !== 'waiting' && k !== 'PENDING')
@@ -98,30 +102,30 @@ export default function Dashboard() {
   const statusData = stats ? Object.entries(stats.by_status || {}) as [string, number][] : []
 
   return (
-    <div className="space-y-8 p-8 max-w-7xl mx-auto">
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-amber-500/10 p-2 border border-amber-500/20">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="shrink-0 rounded-xl bg-amber-500/10 p-2 border border-amber-500/20">
             <Activity className="h-5 w-5 text-amber-500" />
           </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Mission Control</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white truncate">Mission Control</h1>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
               System Overview
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 backdrop-blur-sm">
+        <div className="shrink-0 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2 sm:px-3 py-1.5 backdrop-blur-sm">
           <div className="h-2 w-2 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
-          <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-500">
+          <span className="hidden sm:inline text-[9px] font-bold uppercase tracking-widest text-emerald-500">
             System Active
           </span>
         </div>
       </div>
 
       {/* Quick Launch */}
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] p-8 shadow-2xl transition-all hover:border-white/20">
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] p-4 sm:p-6 md:p-8 shadow-2xl transition-all hover:border-white/20">
         <div className="absolute top-0 right-0 p-32 bg-amber-500/5 blur-[100px] rounded-full pointer-events-none"></div>
 
         <div className="relative z-10">
@@ -183,9 +187,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="mt-6 flex flex-wrap items-end justify-between gap-6 border-t border-white/5 pt-6">
-            <div className="flex flex-wrap items-center gap-8">
-              <div className="flex items-center gap-4">
+          <div className="mt-6 flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-4 sm:gap-6 border-t border-white/5 pt-6">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-4 sm:gap-8">
+              <div className="flex items-center gap-4 w-full sm:w-auto">
                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
                   <SlidersHorizontal className="h-3 w-3" /> Volume
                 </div>
@@ -195,21 +199,21 @@ export default function Dashboard() {
                   max={500}
                   value={maxApps}
                   onChange={(e) => setMaxApps(Number(e.target.value))}
-                  className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-white/10 accent-amber-500"
+                  className="h-1.5 flex-1 sm:w-32 sm:flex-none cursor-pointer appearance-none rounded-full bg-white/10 accent-amber-500"
                 />
                 <span className="w-12 text-right text-lg font-black tabular-nums text-amber-500">
                   {maxApps}
                 </span>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
+              <div className="flex items-center gap-4 w-full sm:w-auto">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/40 shrink-0">
                   <FileText className="h-3 w-3" /> Resume
                 </div>
                 <select
                   value={selectedCv || ''}
                   onChange={(e) => setSelectedCv(e.target.value ? Number(e.target.value) : null)}
-                  className="cursor-pointer appearance-none rounded-lg border border-white/10 bg-black/50 px-4 py-2 text-sm text-white transition-colors focus:border-amber-500/50 focus:outline-none"
+                  className="flex-1 sm:flex-none cursor-pointer appearance-none rounded-lg border border-white/10 bg-black/50 px-4 py-2 text-sm text-white transition-colors focus:border-amber-500/50 focus:outline-none"
                 >
                   <option value="">Default Platform CV</option>
                   {cvs.map((cv: any) => (
@@ -221,19 +225,32 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <button
-              onClick={launch}
-              disabled={launching || !jobTitle.trim()}
-              className="group relative overflow-hidden rounded-xl bg-amber-500 px-8 py-4 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] transition-all hover:scale-[1.02] hover:bg-amber-400 hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
-            >
-              <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-12deg)_translateX(-100%)] group-hover:duration-1000 group-hover:[transform:skew(-12deg)_translateX(100%)]">
-                <div className="relative h-full w-8 bg-white/20" />
-              </div>
-              <span className="relative flex items-center gap-2">
-                {launching ? 'Initializing...' : 'Launch Sequence'}
-                {!launching && <Rocket className="h-4 w-4" />}
-              </span>
-            </button>
+            {isGuest ? (
+              <Link
+                to="/login?register=1"
+                className="group relative w-full sm:w-auto overflow-hidden rounded-xl bg-amber-500 px-8 py-4 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] transition-all hover:scale-[1.02] hover:bg-amber-400 hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] active:scale-[0.98] text-center block"
+              >
+                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                <span className="relative flex items-center justify-center gap-2">
+                  Subscribe — €8/mo
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </span>
+              </Link>
+            ) : (
+              <button
+                onClick={launch}
+                disabled={launching || !jobTitle.trim()}
+                className="group relative w-full sm:w-auto overflow-hidden rounded-xl bg-amber-500 px-8 py-4 text-sm font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] transition-all hover:scale-[1.02] hover:bg-amber-400 hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+              >
+                <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-12deg)_translateX(-100%)] group-hover:duration-1000 group-hover:[transform:skew(-12deg)_translateX(100%)]">
+                  <div className="relative h-full w-8 bg-white/20" />
+                </div>
+                <span className="relative flex items-center justify-center gap-2">
+                  {launching ? 'Initializing...' : 'Launch Sequence'}
+                  {!launching && <Rocket className="h-4 w-4" />}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>

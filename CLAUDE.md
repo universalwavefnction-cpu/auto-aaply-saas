@@ -65,7 +65,7 @@ bun run build                                      # Production build
 - **Frontend**: React 18 + Vite + TypeScript + Tailwind (port 5173, proxies /api to 8000)
 - **Automation**: Playwright headless browser
 - **Workers**: Celery + Redis (scrape + apply cycles)
-- **Deploy**: AWS EC2 at `ubuntu@108.130.251.241`
+- **Deploy**: AWS EC2 at `ubuntu@52.30.96.169`
 
 ## Key Files
 ```

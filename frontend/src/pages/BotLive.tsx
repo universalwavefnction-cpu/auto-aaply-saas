@@ -65,7 +65,7 @@ export default function BotLive() {
   const progress = stats.total > 0 ? ((stats.applied + stats.failed + stats.skipped) / stats.total) * 100 : 0
 
   return (
-    <div className="flex h-full flex-col space-y-6 p-8 max-w-7xl mx-auto">
+    <div className="flex h-full flex-col space-y-4 sm:space-y-6 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex shrink-0 items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-amber-500/10 p-2 border border-amber-500/20"><Bot className="h-5 w-5 text-amber-500" /></div>

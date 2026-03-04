@@ -54,4 +54,22 @@ def migrate_db():
         if "gmail_app_password_encrypted" not in cred_cols:
             conn.execute(text("ALTER TABLE credentials ADD COLUMN gmail_app_password_encrypted VARCHAR"))
 
+        # Jobs table: discovery fields
+        job_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(jobs)"))}
+        for col, definition in [
+            ("employment_type", "VARCHAR"),
+            ("posted_at", "DATETIME"),
+            ("source_id", "VARCHAR"),
+            ("description_hash", "VARCHAR"),
+            ("salary_text", "VARCHAR"),
+            ("platforms_seen", "TEXT"),  # JSON stored as text in SQLite
+        ]:
+            if col not in job_cols:
+                conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {col} {definition}"))
+
+        # Job filters: scrape_platforms
+        filter_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(job_filters)"))}
+        if "scrape_platforms" not in filter_cols:
+            conn.execute(text("ALTER TABLE job_filters ADD COLUMN scrape_platforms TEXT"))
+
         conn.commit()

@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     GMAIL_EMAIL_LI: str = ""
     GMAIL_APP_PASSWORD_LI: str = ""
 
+    # Discovery API keys (optional — scrapers skip gracefully if empty)
+    JOOBLE_API_KEY: str = ""  # Register at https://jooble.org/api/about
+    ADZUNA_APP_ID: str = ""  # Register at https://developer.adzuna.com/
+    ADZUNA_APP_KEY: str = ""
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""

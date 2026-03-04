@@ -47,8 +47,8 @@ export default function Jobs() {
   }
 
   return (
-    <div className="space-y-8 p-8 max-w-7xl mx-auto relative">
-      <div className={`fixed top-8 right-8 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl backdrop-blur-md transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0 pointer-events-none'}`}>
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto relative">
+      <div className={`fixed top-[60px] md:top-8 right-4 sm:right-8 left-4 sm:left-auto z-50 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl backdrop-blur-md transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0 pointer-events-none'}`}>
         <CheckCircle2 className="h-4 w-4" />{toast.msg}
       </div>
 

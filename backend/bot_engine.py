@@ -18,6 +18,19 @@ from sqlalchemy.orm import Session
 from .database import SessionLocal
 from .models import BotLog, Job, Application, Profile, PlatformCredential, JobFilter, CVFile
 from .config import settings
+from .stepstone import (
+    SS_CONFIRM_KEYWORDS, SS_INTEREST_KEYWORDS, SS_SUMMARY_KEYWORDS,
+    SS_EXTERNAL_KEYWORDS, SS_APPLY_SELECTORS, SS_INTEREST_SELECTORS,
+    SS_FORTSETZEN_SELECTORS, SS_SUBMIT_SELECTORS, SS_NEXT_SELECTORS,
+    SS_SUBMIT_BUTTON_KEYWORDS, SS_LOGIN_TOGGLE_SELECTORS,
+    SS_EMAIL_INPUT_SELECTORS, SS_PASSWORD_INPUT_SELECTORS,
+    SS_LOGIN_BUTTON_SELECTORS, SS_LOGGED_IN_KEYWORDS,
+    SS_REMOVE_OVERLAYS_JS, SS_VISIBLE_BUTTONS_JS,
+    SS_SMART_APPLY_BUTTONS_JS, SS_PAGE_SNIPPET_JS,
+    ss_check_confirmation, ss_check_interest_confirmed,
+    ss_check_summary, ss_check_external, ss_check_on_form,
+    ss_to_short_url, ss_is_submit_button,
+)
 
 SCREENSHOT_DIR = Path("/tmp/bot_screenshots")
 SCREENSHOT_DIR.mkdir(exist_ok=True)
@@ -94,17 +107,6 @@ def _is_title_relevant(job_title: str, search_queries: list[str], threshold: int
     return False
 
 
-def _to_short_url(url: str) -> str:
-    """Convert long stellenangebote URLs to short /job/ format. Long URLs get blocked from datacenter IPs."""
-    # Already short format
-    if "/job/" in url and not "stellenangebote" in url:
-        return url
-    # Extract job ID from long URL like: stellenangebote--Title--12345678-inline.html
-    m = re.search(r'--(\d{6,})', url)
-    if m:
-        return f"https://www.stepstone.de/job/{m.group(1)}"
-    return url
-
 
 STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -158,20 +160,50 @@ _UA_POOL = [
 
 # LinkedIn question-answer patterns (bilingual DE/EN)
 _LINKEDIN_QA: dict[str, str] = {
+    # Work authorization
     "authorized to work": "Yes", "legally authorized": "Yes", "work authorization": "Yes",
     "work permit": "Yes", "right to work": "Yes", "eligible to work": "Yes",
     "arbeitsgenehmigung": "Yes", "arbeitserlaubnis": "Yes", "arbeitsberechtigung": "Yes",
+    "berechtigt.*zu arbeiten": "Yes", "erlaubnis.*zu arbeiten": "Yes",
+    # Visa / sponsorship
     "sponsorship": "No", "visa sponsorship": "No", "require sponsorship": "No",
     "visum": "No", "visumsponsoring": "No",
+    # Relocation / commute
     "relocation": "Yes", "willing to relocate": "Yes", "umzug": "Yes", "umziehen": "Yes",
     "commute": "Yes", "work on-site": "Yes", "hybrid": "Yes", "remote": "Yes",
     "pendeln": "Yes", "vor ort": "Yes", "homeoffice": "Yes",
+    "bereit.*reisen": "Yes", "willing to travel": "Yes", "reisebereitschaft": "Yes",
+    # Background / compliance
     "background check": "Yes", "drug test": "Yes", "führungszeugnis": "Yes",
+    "polizeiliches": "Yes", "sicherheitsüberprüfung": "Yes",
+    # Start date / notice
     "start immediately": "Yes", "notice period": "2 weeks", "earliest start": "Immediately",
     "availability": "Immediately", "kündigungsfrist": "2 Wochen",
     "verfügbarkeit": "Sofort", "eintrittsdatum": "Sofort", "ab wann": "Sofort",
+    "frühestmöglicher": "Sofort", "wann.*anfangen": "Sofort", "startdatum": "Sofort",
+    # Education
     "degree": "Yes", "bachelor": "Yes", "education": "Yes",
-    "abschluss": "Yes", "ausbildung": "Yes",
+    "abschluss": "Yes", "ausbildung": "Yes", "studium": "Yes", "hochschulabschluss": "Yes",
+    # License / tools
+    "driver.?s? license": "Yes", "führerschein": "Yes", "fahrerlaubnis": "Yes",
+    "microsoft office": "Yes", "excel": "Yes", "sap": "Yes", "crm": "Yes",
+    # Languages
+    "language": "German, English", "sprach": "Deutsch, Englisch",
+    "deutsch.*niveau": "C2", "english.*level": "C1", "englisch.*niveau": "C1",
+    "german.*level": "C2",
+    # How did you hear
+    "how did you hear": "LinkedIn", "wie.*aufmerksam": "LinkedIn",
+    "wo haben sie.*erfahren": "LinkedIn", "where did you find": "LinkedIn",
+    # Citizenship
+    "citizenship": "EU", "eu citizen": "Yes", "eu-bürger": "Yes", "staatsangehörigkeit": "EU",
+    # Disability
+    "disability": "No", "behinderung": "Nein",
+    # Gender (prefer not to say)
+    "gender": "Prefer not to say", "geschlecht": "Keine Angabe",
+    # Veteran
+    "veteran": "No",
+    # Shift / overtime
+    "shift work": "Yes", "schichtarbeit": "Yes", "overtime": "Yes", "überstunden": "Yes",
 }
 
 
@@ -790,6 +822,18 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 await self.log("info", "system", "cv_selected", {
                     "message": f"Using CV: {cv_file.label} ({os.path.basename(cv_file.file_path)})",
                 })
+        # Fallback: if no CV explicitly selected, pick the first available CV for this user
+        if not cv_path:
+            first_cv = db.query(CVFile).filter(CVFile.user_id == self.user_id).order_by(CVFile.id.desc()).first()
+            if first_cv and first_cv.file_path and os.path.exists(first_cv.file_path):
+                cv_path = first_cv.file_path
+                await self.log("info", "system", "cv_fallback", {
+                    "message": f"No CV selected — using most recent: {first_cv.label} ({os.path.basename(first_cv.file_path)})",
+                })
+            else:
+                await self.log("warn", "system", "no_cv", {
+                    "message": "No CV available — uploads requiring CV will fail",
+                })
 
         # Normalize phone — Xing requires +49 format, not "155 610 577 65"
         raw_phone = profile_row.phone or ""
@@ -985,7 +1029,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                     continue
 
                                 raw_url = href if href.startswith("http") else f"https://www.stepstone.de{href}"
-                                full_url = _to_short_url(raw_url)
+                                full_url = ss_to_short_url(raw_url)
 
                                 # Check blacklist
                                 if job_filter:
@@ -1070,14 +1114,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
             # Switch to login mode — try multiple selectors
             login_toggle = None
-            for sel in [
-                'button:has-text("Jetzt einloggen")',
-                'a:has-text("Jetzt einloggen")',
-                'button:has-text("Log in")',
-                'a:has-text("Log in")',
-                'button:has-text("Sign in")',
-                '[data-testid="login-toggle"]',
-            ]:
+            for sel in SS_LOGIN_TOGGLE_SELECTORS:
                 login_toggle = await page.query_selector(sel)
                 if login_toggle and await login_toggle.is_visible():
                     break
@@ -1106,14 +1143,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
             # Fill email — try multiple selectors
             email_input = None
-            for sel in [
-                'input[type="email"]',
-                'input[name="email"]',
-                'input[autocomplete="email"]',
-                'input[autocomplete="username"]',
-                'input[id*="email"]',
-                'input[id*="Email"]',
-            ]:
+            for sel in SS_EMAIL_INPUT_SELECTORS:
                 email_input = await page.query_selector(sel)
                 if email_input and await email_input.is_visible():
                     break
@@ -1136,11 +1166,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
             # Fill password — try multiple selectors
             pw_input = None
-            for sel in [
-                'input[type="password"]',
-                'input[name="password"]',
-                'input[autocomplete="current-password"]',
-            ]:
+            for sel in SS_PASSWORD_INPUT_SELECTORS:
                 pw_input = await page.query_selector(sel)
                 if pw_input and await pw_input.is_visible():
                     break
@@ -1149,7 +1175,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if pw_input:
                 await pw_input.click()
                 await asyncio.sleep(0.3)
-                await pw_input.type(cred.password_encrypted, delay=random.randint(30, 80))
+                await pw_input.type(cred.get_password(), delay=random.randint(30, 80))
                 await self.log("info", "apply", "login_password", {
                     "message": "  Entered password",
                 }, platform="stepstone")
@@ -1166,12 +1192,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
             # Click "Einloggen" / "Log in" / "Sign in" button
             login_btn = None
-            for sel in [
-                'button:has-text("Einloggen")',
-                'button:has-text("Log in")',
-                'button:has-text("Sign in")',
-                'button[type="submit"]',
-            ]:
+            for sel in SS_LOGIN_BUTTON_SELECTORS:
                 login_btn = await page.query_selector(sel)
                 if login_btn and await login_btn.is_visible():
                     break
@@ -1259,11 +1280,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             # If we're on the profile page (not redirected to login/register) = success
             if "register" not in verify_url and "login" not in verify_url:
                 # Double-check: look for logged-in indicators
-                if any(kw in page_text for kw in [
-                    "mein stepstone", "abmelden", "logout", "mein konto",
-                    "my stepstone", "sign out", "profil", "profile",
-                    "lebenslauf", "resume", "bewerbung",
-                ]):
+                if any(kw in page_text for kw in SS_LOGGED_IN_KEYWORDS):
                     await self.log("info", "apply", "login_success", {
                         "message": f"  Login VERIFIED — profile page accessible",
                         "url": verify_url,
@@ -1398,6 +1415,506 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 "message": f"  Profile CV update failed: {str(e)[:200]} — continuing with existing profile CV",
             }, platform="stepstone")
 
+    # ── StepStone Helper Methods ──────────────────────────────────────────
+
+    async def _ss_get_page_text(self) -> str:
+        """Get the lowercase body text of the current page."""
+        try:
+            return (await self._page.inner_text("body")).lower()
+        except Exception:
+            return ""
+
+    async def _ss_find_button(self, selectors: list[str]):
+        """Find first visible button matching any selector.
+
+        Returns (button_handle, button_text) or (None, '').
+        """
+        for sel in selectors:
+            btn = await self._page.query_selector(sel)
+            if btn and await btn.is_visible():
+                text = (await btn.inner_text()).strip()
+                return btn, text
+        return None, ""
+
+    async def _ss_click_and_wait(self, btn, screenshot_name: str = None) -> str:
+        """Click a button via JS .click() and wait for URL change. Returns final URL."""
+        pre_url = self._page.url
+        await btn.scroll_into_view_if_needed()
+        await asyncio.sleep(0.5)
+        await btn.evaluate("el => el.click()")
+        for _ in range(10):
+            await asyncio.sleep(1)
+            if self._page.url != pre_url:
+                break
+        await asyncio.sleep(2)
+        if screenshot_name:
+            await self.screenshot(screenshot_name)
+        return self._page.url
+
+    async def _ss_remove_overlays(self):
+        """Remove DOM overlays that block clicks on StepStone job pages."""
+        await self._dismiss_popups()
+        await self._page.evaluate(SS_REMOVE_OVERLAYS_JS)
+        await asyncio.sleep(0.5)
+
+    async def _ss_find_apply_button(self, job):
+        """Find the apply button on a StepStone job page.
+
+        Returns (button_handle, button_text, apply_type) or (None, '', None).
+        apply_type is 'full' or 'interest'.
+        """
+        # Try full apply buttons first
+        for sel, atype in SS_APPLY_SELECTORS:
+            btn = await self._page.query_selector(sel)
+            if btn and await btn.is_visible():
+                text = (await btn.inner_text()).strip()
+                await self.log("info", "apply", "button_found", {
+                    "message": f'  Apply button: "{text}"',
+                    "selector": sel, "button_text": text,
+                }, job_id=job.id, platform=job.platform)
+                return btn, text, atype
+
+        # Fall back to interest buttons
+        for sel in SS_INTEREST_SELECTORS:
+            btn = await self._page.query_selector(sel)
+            if btn and await btn.is_visible():
+                text = (await btn.inner_text()).strip()
+                await self.log("info", "apply", "interest_button", {
+                    "message": f'  Schnellbewerbung: "{text}"',
+                }, job_id=job.id, platform=job.platform)
+                return btn, text, "interest"
+
+        return None, "", None
+
+    async def _ss_fill_form_fields(self, profile: dict):
+        """Fill all visible form fields on the current page step.
+
+        Handles: checkboxes, radio buttons, selects, text inputs, dates, textareas.
+        Used by both Schnellbewerbung edit flow and Smart Apply multi-step forms.
+        """
+        page = self._page
+        try:
+            # Checkboxes (consent/GDPR)
+            for cb in await page.query_selector_all("input[type='checkbox']:visible"):
+                try:
+                    if not await cb.is_checked():
+                        await cb.click(force=True)
+                        await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+
+            # Radio buttons — select Yes/Ja or first option
+            handled_groups: set[str] = set()
+            for ri in await page.query_selector_all("input[type='radio']:visible"):
+                rname = await ri.get_attribute("name") or ""
+                if rname in handled_groups:
+                    continue
+                handled_groups.add(rname)
+                try:
+                    grp_checked = await page.evaluate(
+                        """(n) => Array.from(document.querySelectorAll('input[type="radio"][name="'+n+'"]')).some(r => r.checked)""",
+                        rname,
+                    )
+                    if not grp_checked:
+                        yes_r = await page.query_selector(f"input[type='radio'][name='{rname}'][value='true']")
+                        if yes_r:
+                            await yes_r.click(force=True)
+                        else:
+                            await ri.click(force=True)
+                except Exception:
+                    pass
+
+            # Also handle radios inside fieldsets (Smart Apply pattern)
+            for fs in await page.query_selector_all("fieldset:visible"):
+                try:
+                    radios = await fs.query_selector_all("input[type='radio']")
+                    if radios and not any([await r.is_checked() for r in radios]):
+                        clicked = False
+                        for r in radios:
+                            label_el = await r.evaluate_handle("el => el.closest('label') || el.parentElement")
+                            label_text = (await label_el.inner_text()).strip().lower() if label_el else ""
+                            if label_text in ["yes", "ja", "true", "oui"]:
+                                await r.click(force=True)
+                                clicked = True
+                                break
+                        if not clicked and radios:
+                            await radios[0].click(force=True)
+                except Exception:
+                    pass
+
+            # Select dropdowns — pick first non-empty option
+            for sel_el in await page.query_selector_all("select:visible"):
+                try:
+                    val = await sel_el.input_value()
+                    if not val or not val.strip():
+                        for opt in await sel_el.query_selector_all("option"):
+                            ov = await opt.get_attribute("value")
+                            if ov and ov.strip() and ov not in ("", "0", "null", "undefined", "-1"):
+                                await sel_el.select_option(value=ov)
+                                break
+                except Exception:
+                    pass
+
+            # Text inputs — fill with context-aware defaults
+            for ti in await page.query_selector_all(
+                "input[type='text']:visible:not([readonly]), input:not([type]):visible:not([readonly])"
+            ):
+                try:
+                    val = await ti.input_value()
+                    if not val or not val.strip():
+                        name = (await ti.get_attribute("name") or "").lower()
+                        placeholder = (await ti.get_attribute("placeholder") or "").lower()
+                        label_text = ""
+                        try:
+                            ti_id = await ti.get_attribute("id")
+                            if ti_id:
+                                lbl = await page.query_selector(f'label[for="{ti_id}"]')
+                                if lbl:
+                                    label_text = (await lbl.inner_text()).strip().lower()
+                        except Exception:
+                            pass
+                        combined = f"{name} {placeholder} {label_text}"
+                        if "email" in combined or "phone" in combined or "telefon" in combined:
+                            pass  # Usually pre-filled
+                        elif "salary" in combined or "gehalt" in combined:
+                            await ti.fill(str(profile.get("salary_expectation", "50000")))
+                        elif "year" in combined or "jahr" in combined or "experience" in combined:
+                            await ti.fill(str(profile.get("years_experience", "5")))
+                        elif "city" in combined or "ort" in combined or "stadt" in combined:
+                            await ti.fill(profile.get("city", "Berlin"))
+                        else:
+                            await ti.fill("Yes")
+                except Exception:
+                    pass
+
+            # Date inputs — fill with first day of next month
+            for di in await page.query_selector_all("input[type='date']:visible:not([readonly])"):
+                try:
+                    val = await di.input_value()
+                    if not val or not val.strip():
+                        import datetime as _dt
+                        _nxt = (_dt.date.today().replace(day=1) + _dt.timedelta(days=32)).replace(day=1)
+                        await di.fill(_nxt.isoformat())
+                except Exception:
+                    pass
+
+            # Textareas — fill with generic interest message
+            for ta in await page.query_selector_all("textarea:visible:not([readonly])"):
+                try:
+                    val = await ta.input_value()
+                    if not val or not val.strip():
+                        await ta.fill("I am very interested in this position and believe my skills are a strong match.")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    async def _ss_submit_via_fortsetzen(self, job, screenshot_name: str) -> tuple[str, str]:
+        """Click 'Bewerbung fortsetzen' on summary page and check the result.
+
+        Returns (status, error_log) — status is 'success', 'external', or 'failed'.
+        """
+        btn, btn_label = await self._ss_find_button(SS_FORTSETZEN_SELECTORS)
+
+        if not btn:
+            return "failed", "Summary page detected but no Continue button found"
+
+        await self.log("info", "apply", "submitting", {
+            "message": f'  Clicking "{btn_label}" (summary page)...',
+        }, job_id=job.id, platform=job.platform)
+
+        final_url = await self._ss_click_and_wait(btn, screenshot_name)
+        page_text = await self._ss_get_page_text()
+
+        # Check for external redirect
+        if ss_check_external(page_text, final_url):
+            return "external", "Redirected to company external form"
+
+        # Check for confirmation
+        is_confirmed, _ = ss_check_confirmation(page_text, final_url)
+        if is_confirmed:
+            return "success", ""
+
+        # Button gone but no confirmation keywords — still mark failed (conservative)
+        still_has, _ = await self._ss_find_button(SS_FORTSETZEN_SELECTORS)
+        if not still_has:
+            await self.log("debug", "apply", "fortsetzen_no_confirm", {
+                "message": "  Submit button gone but no confirmation keywords",
+                "page_text_snippet": page_text[:300],
+                "url": final_url,
+            }, job_id=job.id, platform=job.platform)
+
+        return "failed", "Submit not confirmed after clicking continue"
+
+    async def _ss_handle_interest_flow(self, profile: dict, job) -> tuple[str, str]:
+        """Handle the Schnellbewerbung / Interest flow after clicking the button.
+
+        Waits for summary overlay or auto-confirmation, then clicks fortsetzen.
+        Returns (status, error_log).
+        """
+        await self._dismiss_consent()
+
+        # Wait for summary overlay or confirmation page (up to 12s)
+        has_summary = False
+        for _ in range(12):
+            await asyncio.sleep(1)
+            try:
+                page_text = await self._ss_get_page_text()
+
+                # Check for summary page
+                if ss_check_summary(page_text):
+                    has_summary = True
+                    break
+
+                # Check for auto-confirmation (submitted without showing summary)
+                is_confirmed, matched_kw = ss_check_confirmation(page_text, self._page.url)
+                if is_confirmed:
+                    await self.screenshot("after_apply_click")
+                    await self.log("info", "apply", "auto_confirmed", {
+                        "message": f"  Auto-confirmed: matched '{matched_kw}'",
+                    }, job_id=job.id, platform=job.platform)
+                    return "success", ""
+            except Exception:
+                break
+
+        await self.screenshot("after_apply_click")
+
+        if has_summary:
+            await self.log("info", "apply", "schnell_summary", {
+                "message": "  Summary shown — clicking 'Bewerbung fortsetzen'...",
+            }, job_id=job.id, platform=job.platform)
+            return await self._ss_submit_via_fortsetzen(job, "after_fortsetzen_direct")
+
+        # No summary detected — re-check page state
+        page_text = await self._ss_get_page_text()
+
+        # Already on confirmation page?
+        is_confirmed, _ = ss_check_confirmation(page_text, self._page.url)
+        if is_confirmed:
+            return "success", ""
+
+        # Late-render summary?
+        if ss_check_summary(page_text):
+            await self.log("info", "apply", "late_summary_detected", {
+                "message": "  Summary page detected (late render) — clicking 'Continue application'...",
+            }, job_id=job.id, platform=job.platform)
+            return await self._ss_submit_via_fortsetzen(job, "after_late_summary_submit")
+
+        # Interest-specific confirmation keywords?
+        is_interest_confirmed, _ = ss_check_interest_confirmed(page_text, self._page.url)
+        if is_interest_confirmed:
+            return "success", ""
+
+        # Check if interest button is disabled (= submitted successfully)
+        for sel in SS_INTEREST_SELECTORS:
+            btn = await self._page.query_selector(sel)
+            if btn:
+                is_disabled = await btn.get_attribute("disabled")
+                aria_disabled = await btn.get_attribute("aria-disabled")
+                if is_disabled is not None or aria_disabled == "true":
+                    return "success", ""
+                break
+
+        # Check if we landed on a full application form
+        if ss_check_on_form(page_text, self._page.url):
+            await self.log("info", "apply", "interest_to_form", {
+                "message": "  'I'm interested' opened a full application form — handling as Smart Apply",
+                "url": self._page.url,
+            }, job_id=job.id, platform=job.platform)
+            return await self._ss_handle_smart_apply(profile, job)
+
+        # Nothing matched — mark as failed
+        text_snippet = page_text[:300] if page_text else "(empty)"
+        await self.log("warn", "apply", "button_gone_uncertain", {
+            "message": "  Button gone but no confirmation — marking failed",
+            "url": self._page.url,
+            "page_text_snippet": text_snippet,
+        }, job_id=job.id, platform=job.platform)
+        return "failed", "Interest button disappeared but no confirmation detected"
+
+    async def _ss_handle_smart_apply(self, profile: dict, job) -> tuple[str, str]:
+        """Handle Smart Apply multi-step form.
+
+        Fills fields, uploads CV, advances through steps, and submits.
+        Returns (status, error_log).
+        """
+        await self.log("info", "apply", "smart_apply_form", {
+            "message": "  Smart Apply form loaded — submitting application...",
+            "url": self._page.url[:100],
+        }, job_id=job.id, platform=job.platform)
+
+        await asyncio.sleep(random.uniform(2, 4))
+        await self._dismiss_consent()
+        await self._dismiss_popups()
+
+        # Upload CV to any file inputs on the form
+        cv_path = profile.get("cv_path")
+        if cv_path and os.path.exists(cv_path):
+            try:
+                for fi in await self._page.query_selector_all('input[type="file"]'):
+                    try:
+                        await fi.set_input_files(cv_path)
+                        await self.log("info", "form", "cv_uploaded", {
+                            "message": f"  Uploaded CV: {os.path.basename(cv_path)}",
+                        }, job_id=job.id, platform=job.platform)
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                        await self.log("warn", "form", "cv_upload_error", {
+                            "message": f"  CV upload failed: {e}",
+                        }, job_id=job.id, platform=job.platform)
+            except Exception:
+                pass
+
+            # Also try clicking Upload buttons that reveal hidden file inputs
+            for upload_sel in [
+                'button:has-text("Upload")', 'button:has-text("Hochladen")',
+                'button:has-text("Lebenslauf")', 'button:has-text("CV")',
+                'label:has-text("Upload")', 'label:has-text("Hochladen")',
+                '[data-testid*="upload"]', '[data-testid*="cv"]',
+            ]:
+                try:
+                    upload_btn = await self._page.query_selector(upload_sel)
+                    if upload_btn and await upload_btn.is_visible():
+                        for_id = await upload_btn.get_attribute("for")
+                        if for_id:
+                            fi = await self._page.query_selector(f'input#{for_id}')
+                            if fi:
+                                await fi.set_input_files(cv_path)
+                                await self.log("info", "form", "cv_uploaded_via_label", {
+                                    "message": f"  Uploaded CV via label: {os.path.basename(cv_path)}",
+                                }, job_id=job.id, platform=job.platform)
+                                await asyncio.sleep(1)
+                                break
+                except Exception:
+                    continue
+
+        # Multi-step form loop — fill fields and advance through steps
+        submit_btn = None
+        for step_i in range(8):
+            await asyncio.sleep(1)
+
+            # Fill form fields on current step
+            await self._ss_fill_form_fields(profile)
+
+            # Check if final submit button is visible
+            submit_btn, _ = await self._ss_find_button(SS_SUBMIT_SELECTORS)
+            if submit_btn:
+                break
+
+            # Look for Continue/Next button to advance
+            next_btn = None
+            for sel in SS_NEXT_SELECTORS:
+                btn = await self._page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    btn_text = (await btn.inner_text()).strip().lower()
+                    # If this is actually a submit button, use it as such
+                    if ss_is_submit_button(btn_text):
+                        submit_btn = btn
+                        break
+                    next_btn = btn
+                    break
+            if submit_btn:
+                break
+            if not next_btn:
+                break  # No button found — fall through
+
+            next_label = (await next_btn.inner_text()).strip()
+            await self.log("info", "form", "smart_apply_step", {
+                "message": f'  Smart Apply step {step_i + 1}: clicking "{next_label}"',
+            }, job_id=job.id, platform=job.platform)
+            await next_btn.scroll_into_view_if_needed()
+            await asyncio.sleep(0.5)
+            await next_btn.evaluate("el => el.click()")
+            await asyncio.sleep(2)
+            await self.screenshot(f"smart_apply_step_{step_i + 2}")
+
+        if submit_btn:
+            submit_text = (await submit_btn.inner_text()).strip()
+            await self.log("info", "apply", "submitting", {
+                "message": f'  Clicking "{submit_text}"...',
+            }, job_id=job.id, platform=job.platform)
+
+            final_url = await self._ss_click_and_wait(submit_btn, "after_submit")
+            page_text = await self._ss_get_page_text()
+
+            is_confirmed, _ = ss_check_confirmation(page_text, final_url)
+            if is_confirmed:
+                return "success", ""
+
+            # Check if submit button is gone (probable success)
+            still_has, _ = await self._ss_find_button(SS_SUBMIT_SELECTORS)
+            if not still_has:
+                return "success", ""
+
+            return "failed", "Submit button still present — may not have submitted"
+
+        # No submit button found — check if form was already submitted
+        page_text = await self._ss_get_page_text()
+        is_confirmed, _ = ss_check_confirmation(page_text, self._page.url)
+        if is_confirmed or "application" not in self._page.url.lower():
+            return "success", ""
+
+        # Log diagnostics
+        try:
+            all_btns = await self._page.evaluate(SS_SMART_APPLY_BUTTONS_JS)
+        except Exception:
+            all_btns = []
+        await self.log("warn", "apply", "no_submit_button", {
+            "message": "  Smart Apply: no submit button found after step-through",
+            "url": self._page.url[:100],
+            "page_text_snippet": page_text[:300],
+            "visible_buttons": all_btns,
+        }, job_id=job.id, platform=job.platform)
+        return "failed", "No submit button on smart-apply form"
+
+    async def _ss_record_result(self, application, db, status: str, error_log: str,
+                                t0: float, job, i: int = -1, total: int = 0):
+        """Record application result — update DB, stats, log, emit progress, and delay."""
+        application.status = status
+        if error_log:
+            application.error_log = error_log
+
+        duration = time.time() - t0
+
+        if status == "success":
+            self.stats["applied"] += 1
+            await self.log("info", "apply", "success", {
+                "message": f"  SUCCESS — Application submitted ({duration:.0f}s)",
+                "duration_s": duration,
+            }, job_id=job.id, platform=job.platform)
+        elif status == "external":
+            self.stats["external"] = self.stats.get("external", 0) + 1
+            await self.log("warn", "apply", "external_redirect", {
+                "message": f"  EXTERNAL — {error_log or 'Needs manual apply'} ({duration:.0f}s)",
+                "duration_s": duration,
+            }, job_id=job.id, platform=job.platform)
+        elif status == "skipped":
+            self.stats["skipped"] += 1
+            await self.log("warn", "apply", "skipped", {
+                "message": f"  SKIPPED — {error_log} ({duration:.0f}s)",
+                "duration_s": duration,
+            }, job_id=job.id, platform=job.platform)
+        else:  # failed
+            self.stats["failed"] += 1
+            await self.log("warn", "apply", "failed", {
+                "message": f"  FAILED — {error_log or 'Unknown error'} ({duration:.0f}s)",
+                "duration_s": duration,
+            }, job_id=job.id, platform=job.platform)
+
+        db.commit()
+        await self.emit_progress()
+
+        # Delay between applications
+        if 0 <= i < total - 1 and self.running:
+            delay = random.uniform(15, 25)
+            await self.log("info", "system", "delay", {
+                "message": f"  Waiting {delay:.0f}s before next application...",
+                "delay_s": delay,
+            })
+            await asyncio.sleep(delay)
+
+    # ── Main StepStone Apply Phase ─────────────────────────────────────────
+
     async def _apply_phase(self, db: Session, profile: dict, creds: list, job_filter: JobFilter, scraped_job_ids: list[int] = None):
         """Apply to unapplied jobs. If scraped_job_ids provided, only apply to those."""
         await self.log("info", "apply", "phase_start", {"message": "Starting application phase..."})
@@ -1518,7 +2035,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 nav_ok = False
                 for attempt in range(3):
                     try:
-                        await self._page.goto(_to_short_url(job.url), timeout=45000, wait_until="domcontentloaded")
+                        await self._page.goto(ss_to_short_url(job.url), timeout=45000, wait_until="domcontentloaded")
                         nav_ok = True
                         break
                     except Exception as nav_err:
@@ -1549,64 +2066,20 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 await self._dismiss_consent()
                 await asyncio.sleep(2)
                 await self._dismiss_consent()
-                await self._dismiss_popups()  # Dismiss job alert popup
+                await self._dismiss_popups()
                 await asyncio.sleep(1)
 
-                # Log current URL to detect redirects
                 cur_url = self._page.url
                 await self.log("info", "browser", "current_url", {
                     "message": f"  URL: {cur_url}",
                     "url": cur_url,
                 }, job_id=job.id, platform=job.platform)
 
-                # Find apply button — try full apply first, then Schnellbewerbung
-                apply_btn = None
-                btn_text = ""
-                apply_type = "full"  # "full" or "interest"
-                for sel in [
-                    'a:has-text("Jetzt bewerben")',
-                    'button:has-text("Jetzt bewerben")',
-                    'a:has-text("Apply now")',
-                    'button:has-text("Apply now")',
-                    'a:has-text("Schnelle Bewerbung")',
-                    'button:has-text("Schnelle Bewerbung")',
-                    'a:has-text("Quick apply")',
-                    'button:has-text("Quick apply")',
-                    'button:has-text("Bewerbung fortsetzen")',
-                    'a:has-text("Bewerbung fortsetzen")',
-                    'button:has-text("Continue application")',
-                    'a:has-text("Continue application")',
-                ]:
-                    apply_btn = await self._page.query_selector(sel)
-                    if apply_btn and await apply_btn.is_visible():
-                        btn_text = (await apply_btn.inner_text()).strip()
-                        await self.log("info", "apply", "button_found", {
-                            "message": f"  Apply button: \"{btn_text}\"",
-                            "selector": sel, "button_text": btn_text,
-                        }, job_id=job.id, platform=job.platform)
-                        break
-                    apply_btn = None
-
-                # Fall back to "Ich bin interessiert" / "I'm interested" (Schnellbewerbung)
-                if not apply_btn:
-                    for sel in [
-                        'button:has-text("Ich bin interessiert")',
-                        'a:has-text("Ich bin interessiert")',
-                        "button:has-text(\"I'm interested\")",
-                        "a:has-text(\"I'm interested\")",
-                    ]:
-                        apply_btn = await self._page.query_selector(sel)
-                        if apply_btn and await apply_btn.is_visible():
-                            btn_text = (await apply_btn.inner_text()).strip()
-                            apply_type = "interest"
-                            await self.log("info", "apply", "interest_button", {
-                                "message": f"  Schnellbewerbung: \"{btn_text}\"",
-                            }, job_id=job.id, platform=job.platform)
-                            break
-                        apply_btn = None
+                # ── Find apply button ──
+                apply_btn, btn_text, apply_type = await self._ss_find_apply_button(job)
 
                 if not apply_btn:
-                    # Dump page HTML around apply area + iframe URLs for diagnosis
+                    # No apply button — log diagnostics, mark as external
                     iframe_info = []
                     for f in self._page.frames:
                         if f == self._page.main_frame:
@@ -1614,21 +2087,12 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         try:
                             f_content = await f.evaluate("() => document.body ? document.body.innerText.substring(0, 200) : 'empty'")
                             iframe_info.append(f"{f.url[:60]} | {f_content[:80]}")
-                        except:
+                        except Exception:
                             iframe_info.append(f"{f.url[:60]} | [inaccessible]")
-                    # Get main page HTML snippet around apply area
-                    page_snippet = await self._page.evaluate("""() => {
-                        // Look for the job actions area
-                        const areas = document.querySelectorAll('[class*="actions"], [class*="apply"], [class*="Action"], [class*="Apply"], [class*="sidebar"], [class*="Sidebar"]');
-                        let snippet = '';
-                        areas.forEach(a => { snippet += a.outerHTML.substring(0, 300) + '\\n'; });
-                        if (!snippet) {
-                            // Fallback: get all elements with data-at attributes
-                            const dataAts = document.querySelectorAll('[data-at]');
-                            dataAts.forEach(e => { snippet += `<${e.tagName} data-at="${e.getAttribute('data-at')}">${e.textContent.substring(0, 50)}\\n`; });
-                        }
-                        return snippet.substring(0, 800);
-                    }""")
+                    try:
+                        page_snippet = await self._page.evaluate(SS_PAGE_SNIPPET_JS)
+                    except Exception:
+                        page_snippet = ""
                     await self.log("warn", "apply", "no_button", {
                         "message": f"  No apply btn. Iframes: {iframe_info[:4]}",
                     }, job_id=job.id, platform=job.platform)
@@ -1636,70 +2100,30 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         await self.log("info", "apply", "page_snippet", {
                             "message": f"  Page snippet: {page_snippet[:400]}",
                         }, job_id=job.id, platform=job.platform)
-                    application.status = "external"
-                    application.error_log = "No apply button found on page or iframes"
-                    db.commit()
-                    self.stats["external"] = self.stats.get("external", 0) + 1
-                    await self.emit_progress()
+                    await self._ss_record_result(application, db, "external",
+                                                 "No apply button found on page", t0, job, i, len(jobs))
                     continue
 
-                # Click apply / interest button
-                await self.log("info", "apply", "clicking_apply", {
-                    "message": f"  Clicking \"{btn_text}\"...",
-                }, job_id=job.id, platform=job.platform)
-                # Aggressively remove ALL overlays before clicking
-                await self._dismiss_popups()
-                await self._page.evaluate("""() => {
-                    // Remove all portal overlays, fixed-position blockers, backdrops
-                    document.querySelectorAll('[id*="portal"]').forEach(e => e.remove());
-                    document.querySelectorAll('[data-genesis-element="DRAWER_OVERLAY"]').forEach(e => e.remove());
-                    document.querySelectorAll('[class*="backdrop"], [class*="Backdrop"]').forEach(e => e.remove());
-                    // Remove any fixed-position elements that block clicks
-                    document.querySelectorAll('div').forEach(e => {
-                        const s = window.getComputedStyle(e);
-                        if (s.position === 'fixed' && s.zIndex > 100 && e.id !== 'onetrust-consent-sdk') {
-                            e.remove();
-                        }
-                    });
-                    document.body.style.overflow = 'auto';
-                    document.body.style.pointerEvents = 'auto';
-                }""")
-                await asyncio.sleep(0.5)
-
-                # Re-find button after overlay removal (DOM changes can detach handles)
-                apply_btn = None
-                refind_selectors = [
-                    'a:has-text("Jetzt bewerben")', 'button:has-text("Jetzt bewerben")',
-                    'a:has-text("Apply now")', 'button:has-text("Apply now")',
-                    'button:has-text("Bewerbung fortsetzen")', 'a:has-text("Bewerbung fortsetzen")',
-                    'button:has-text("Ich bin interessiert")', 'a:has-text("Ich bin interessiert")',
-                    "button:has-text(\"I'm interested\")", "a:has-text(\"I'm interested\")",
-                ]
-                for sel in refind_selectors:
-                    apply_btn = await self._page.query_selector(sel)
-                    if apply_btn and await apply_btn.is_visible():
-                        break
-                    apply_btn = None
+                # ── Remove overlays and re-find button ──
+                await self._ss_remove_overlays()
+                apply_btn, btn_text, apply_type = await self._ss_find_apply_button(job)
 
                 if not apply_btn:
                     await self.log("warn", "apply", "button_lost", {
                         "message": "  Button disappeared after overlay removal — skipping",
                     }, job_id=job.id, platform=job.platform)
-                    application.status = "failed"
-                    application.error_log = "Button lost after overlay removal"
-                    db.commit()
-                    self.stats["failed"] += 1
-                    await self.emit_progress()
+                    await self._ss_record_result(application, db, "failed",
+                                                 "Button lost after overlay removal", t0, job, i, len(jobs))
                     continue
 
-                # Scroll button into view
+                # ── Click apply button ──
+                await self.log("info", "apply", "clicking_apply", {
+                    "message": f'  Clicking "{btn_text}"...',
+                }, job_id=job.id, platform=job.platform)
                 await apply_btn.scroll_into_view_if_needed()
                 await asyncio.sleep(0.5)
-
-                # Use JavaScript .click() — normal Playwright clicks fail due to body overflow
                 old_url = self._page.url
                 await apply_btn.evaluate("el => el.click()")
-                # Wait for navigation (can take a few seconds for React to process)
                 for _wait in range(8):
                     await asyncio.sleep(1)
                     if self._page.url != old_url:
@@ -1707,833 +2131,46 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
                 current_url = self._page.url
 
-                # ── Interest / Schnellbewerbung: wait for summary overlay ──
+                # ── Route to the appropriate handler ──
                 if apply_type == "interest":
-                    # Don't dismiss popups yet — the summary IS an overlay/dialog
-                    await self._dismiss_consent()
+                    status, error_log = await self._ss_handle_interest_flow(profile, job)
+                    await self._ss_record_result(application, db, status, error_log, t0, job, i, len(jobs))
+                    # If interest flow fell through to Smart Apply, it's already handled
+                    continue
 
-                    # Wait for summary overlay or confirmation page (up to 12s)
-                    has_summary = False
-                    auto_confirmed = False
-                    for _sw in range(12):
-                        await asyncio.sleep(1)
-                        try:
-                            page_text = (await self._page.inner_text("body")).lower()
-                            # Check for summary page (needs "Continue application")
-                            if any(kw in page_text for kw in [
-                                "zusammenfassung", "bewerbung fortsetzen",
-                                "bewerbung bearbeiten", "continue application",
-                                "application summary", "edit application",
-                                "haupt-lebenslauf", "kontaktdaten",
-                            ]):
-                                has_summary = True
-                                break
-                            # Check for confirmation page (auto-submitted without summary)
-                            if any(kw in page_text for kw in [
-                                "hat alles geklappt", "did all go well",
-                                "eckdaten zur bewerbung",
-                                "so kommst du schneller zum richtigen job",
-                                "deine bewerbungen auf einen blick",
-                            ]):
-                                auto_confirmed = True
-                                break
-                        except:
-                            break
+                # Non-interest (full apply) path
+                await self._dismiss_consent()
+                await self._dismiss_popups()
+                await self.screenshot("after_apply_click")
+                current_url = self._page.url
 
-                    if auto_confirmed:
-                        application.status = "success"
-                        self.stats["applied"] += 1
-                        apply_duration = time.time() - t0
-                        await self.screenshot("after_apply_click")
-                        await self.log("info", "apply", "success", {
-                            "message": f"  SUCCESS — Interest auto-submitted ({apply_duration:.0f}s)",
-                            "duration_s": apply_duration,
-                        }, job_id=job.id, platform=job.platform)
-                        db.commit()
-                        await self.emit_progress()
-                        if i < len(jobs) - 1 and self.running:
-                            delay = random.uniform(15, 25)
-                            await self.log("info", "system", "delay", {
-                                "message": f"  Waiting {delay:.0f}s before next application...",
-                                "delay_s": delay,
-                            })
-                            await asyncio.sleep(delay)
-                        continue
-
-                    await self.screenshot("after_apply_click")
-
-                    if has_summary:
-                        cv_path = profile.get("cv_path")
-                        await self.log("debug", "apply", "schnell_cv_check", {
-                            "message": f"  CV path: {cv_path}, exists: {os.path.exists(cv_path) if cv_path else 'N/A'}",
-                        }, job_id=job.id, platform=job.platform)
-
-                        # Click "Bewerbung bearbeiten" to edit and upload correct CV
-                        if cv_path:
-                            edit_btn = None
-                            for sel in [
-                                'button:has-text("Bewerbung bearbeiten")',
-                                'a:has-text("Bewerbung bearbeiten")',
-                                'button:has-text("Edit application")',
-                                'a:has-text("Edit application")',
-                                # Try broader selectors — might be a div or span
-                                '[data-testid*="edit"]',
-                                'text=Bewerbung bearbeiten',
-                            ]:
-                                try:
-                                    edit_btn = await self._page.query_selector(sel)
-                                    if edit_btn and await edit_btn.is_visible():
-                                        await self.log("debug", "apply", "edit_btn_found", {
-                                            "message": f"  Found edit button with: {sel}",
-                                        }, job_id=job.id, platform=job.platform)
-                                        break
-                                except:
-                                    pass
-                                edit_btn = None
-
-                            if not edit_btn:
-                                # Log what buttons ARE on the page
-                                try:
-                                    all_btns = await self._page.evaluate("""() => {
-                                        return Array.from(document.querySelectorAll('button, a[role="button"], [role="button"]'))
-                                            .filter(e => e.offsetParent !== null)
-                                            .map(e => e.innerText.trim().substring(0, 60))
-                                            .filter(t => t.length > 0);
-                                    }""")
-                                    await self.log("debug", "apply", "visible_buttons", {
-                                        "message": f"  Visible buttons: {all_btns[:10]}",
-                                    }, job_id=job.id, platform=job.platform)
-                                except:
-                                    pass
-
-                            if edit_btn:
-                                await self.log("info", "apply", "schnell_edit", {
-                                    "message": "  Clicking 'Bewerbung bearbeiten' to upload correct CV...",
-                                }, job_id=job.id, platform=job.platform)
-                                await edit_btn.scroll_into_view_if_needed()
-                                await asyncio.sleep(0.5)
-                                await edit_btn.evaluate("el => el.click()")
-                                await asyncio.sleep(random.uniform(2, 4))
-                                await self.screenshot("schnell_step1")
-
-                                # Step 1/2: Contact details — click "Weiter" (Next)
-                                weiter_btn = None
-                                for sel in [
-                                    'button:has-text("Weiter")',
-                                    'button:has-text("Next")',
-                                    'button:has-text("Continue")',
-                                    'button[type="submit"]',
-                                ]:
-                                    weiter_btn = await self._page.query_selector(sel)
-                                    if weiter_btn and await weiter_btn.is_visible():
-                                        break
-                                    weiter_btn = None
-
-                                if weiter_btn:
-                                    weiter_label = (await weiter_btn.inner_text()).strip()
-                                    await self.log("info", "apply", "schnell_step1_next", {
-                                        "message": f"  Step 1: Contact details pre-filled — clicking \"{weiter_label}\"",
-                                    }, job_id=job.id, platform=job.platform)
-                                    await weiter_btn.scroll_into_view_if_needed()
-                                    await asyncio.sleep(0.5)
-                                    await weiter_btn.evaluate("el => el.click()")
-                                    await asyncio.sleep(random.uniform(2, 4))
-                                    await self.screenshot("schnell_step2")
-
-                                # Step 2/2: CV upload — upload our CV via file input
-                                step2_text = (await self._page.inner_text("body")).lower()
-                                if "lebenslauf" in step2_text or "cv" in step2_text or "upload" in step2_text:
-                                    # Try to find and use file input
-                                    uploaded = False
-                                    try:
-                                        file_inputs = await self._page.query_selector_all('input[type="file"]')
-                                        for fi in file_inputs:
-                                            try:
-                                                await fi.set_input_files(cv_path)
-                                                await self.log("info", "form", "cv_uploaded", {
-                                                    "message": f"  Step 2: Uploaded CV: {os.path.basename(cv_path)}",
-                                                }, job_id=job.id, platform=job.platform)
-                                                uploaded = True
-                                                await asyncio.sleep(2)
-                                                break
-                                            except:
-                                                pass
-                                    except:
-                                        pass
-
-                                    # If no file input visible, try clicking upload area / "..." menu
-                                    if not uploaded:
-                                        for upload_sel in [
-                                            '[aria-label*="upload"]', '[aria-label*="hochladen"]',
-                                            'button:has-text("Hochladen")', 'button:has-text("Upload")',
-                                            'button:has-text("Ändern")', 'button:has-text("Change")',
-                                        ]:
-                                            try:
-                                                upload_el = await self._page.query_selector(upload_sel)
-                                                if upload_el and await upload_el.is_visible():
-                                                    await upload_el.click()
-                                                    await asyncio.sleep(1)
-                                                    file_inputs = await self._page.query_selector_all('input[type="file"]')
-                                                    if file_inputs:
-                                                        await file_inputs[0].set_input_files(cv_path)
-                                                        await self.log("info", "form", "cv_uploaded", {
-                                                            "message": f"  Step 2: Uploaded CV via button: {os.path.basename(cv_path)}",
-                                                        }, job_id=job.id, platform=job.platform)
-                                                        uploaded = True
-                                                        await asyncio.sleep(2)
-                                                        break
-                                            except:
-                                                continue
-
-                                    await self.screenshot("schnell_cv_uploaded")
-
-                                # Click "Bewerbung fortsetzen" to submit
-                                fortsetzen_btn = None
-                                for sel in [
-                                    'button:has-text("Bewerbung fortsetzen")',
-                                    'a:has-text("Bewerbung fortsetzen")',
-                                    'button:has-text("Continue application")',
-                                    'button:has-text("Bewerbung abschicken")',
-                                    'button:has-text("Submit application")',
-                                    'button:has-text("Absenden")',
-                                ]:
-                                    fortsetzen_btn = await self._page.query_selector(sel)
-                                    if fortsetzen_btn and await fortsetzen_btn.is_visible():
-                                        break
-                                    fortsetzen_btn = None
-
-                                if fortsetzen_btn:
-                                    fortsetzen_label = (await fortsetzen_btn.inner_text()).strip()
-                                    await self.log("info", "apply", "submitting", {
-                                        "message": f"  Clicking \"{fortsetzen_label}\"...",
-                                    }, job_id=job.id, platform=job.platform)
-                                    await fortsetzen_btn.scroll_into_view_if_needed()
-                                    await asyncio.sleep(0.5)
-                                    pre_url = self._page.url
-                                    await fortsetzen_btn.evaluate("el => el.click()")
-
-                                    for _wait in range(10):
-                                        await asyncio.sleep(1)
-                                        if self._page.url != pre_url:
-                                            break
-                                    await asyncio.sleep(random.uniform(1, 2))
-                                    await self.screenshot("after_schnell_submit")
-
-                                    # Check success
-                                    final_text = ""
-                                    try:
-                                        final_text = (await self._page.inner_text("body")).lower()
-                                    except:
-                                        pass
-                                    final_url = self._page.url
-                                    success = any(kw in final_text for kw in [
-                                        "bewerbung abgeschickt", "application sent", "erfolgreich",
-                                        "vielen dank", "thank you", "gesendet", "submitted",
-                                        "bewerbung wurde", "application has been",
-                                    ]) or "success" in final_url or "confirmation" in final_url
-
-                                    # Check for external redirect (company's own form)
-                                    is_external = (
-                                        "zur verfügung gestellt von stepstone" in final_text
-                                        or "brought to you by stepstone" in final_text
-                                        or "no listing title" in final_text
-                                        or "sie bewerben sich" in final_text and "stepstone" in final_text
-                                    )
-
-                                    if not success and not is_external:
-                                        # Check if submit button is gone (probable success)
-                                        still_has = await self._page.query_selector('button:has-text("Bewerbung fortsetzen")')
-                                        if not still_has:
-                                            success = True
-
-                                    if is_external:
-                                        application.status = "external"
-                                        application.error_log = "Redirected to company external form after CV upload"
-                                        self.stats["external"] = self.stats.get("external", 0) + 1
-                                        apply_duration = time.time() - t0
-                                        await self.log("warn", "apply", "external_redirect", {
-                                            "message": f"  EXTERNAL — Redirected to company form after CV upload ({apply_duration:.0f}s)",
-                                            "url": final_url,
-                                            "duration_s": apply_duration,
-                                        }, job_id=job.id, platform=job.platform)
-                                    elif success:
-                                        application.status = "success"
-                                        self.stats["applied"] += 1
-                                        apply_duration = time.time() - t0
-                                        await self.log("info", "apply", "success", {
-                                            "message": f"  SUCCESS — Schnellbewerbung with CV in {apply_duration:.0f}s",
-                                            "duration_s": apply_duration,
-                                        }, job_id=job.id, platform=job.platform)
-                                    else:
-                                        self.stats["failed"] += 1
-                                        application.error_log = "Submit may not have completed"
-                                        await self.log("warn", "apply", "submit_uncertain", {
-                                            "message": "  Schnellbewerbung submit uncertain",
-                                        }, job_id=job.id, platform=job.platform)
-
-                                    db.commit()
-                                    await self.emit_progress()
-
-                                    if i < len(jobs) - 1 and self.running:
-                                        delay = random.uniform(15, 25)
-                                        await self.log("info", "system", "delay", {
-                                            "message": f"  Waiting {delay:.0f}s before next application...",
-                                            "delay_s": delay,
-                                        })
-                                        await asyncio.sleep(delay)
-                                    continue
-
-                        else:
-                            # No CV to upload — just click "Bewerbung fortsetzen" directly
-                            await self.log("info", "apply", "schnell_summary", {
-                                "message": "  Summary shown — clicking 'Bewerbung fortsetzen'...",
-                            }, job_id=job.id, platform=job.platform)
-
-                        # Fallback: click "Bewerbung fortsetzen" on summary page directly
-                        fortsetzen_btn = None
-                        for sel in [
-                            'button:has-text("Bewerbung fortsetzen")',
-                            'a:has-text("Bewerbung fortsetzen")',
-                            'button:has-text("Continue application")',
-                            'button:has-text("Bewerbung abschicken")',
-                        ]:
-                            fortsetzen_btn = await self._page.query_selector(sel)
-                            if fortsetzen_btn and await fortsetzen_btn.is_visible():
-                                break
-                            fortsetzen_btn = None
-
-                        if fortsetzen_btn:
-                            btn_label = (await fortsetzen_btn.inner_text()).strip()
-                            await self.log("info", "apply", "submitting", {
-                                "message": f"  Clicking \"{btn_label}\" (summary page)...",
-                            }, job_id=job.id, platform=job.platform)
-                            await fortsetzen_btn.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.5)
-                            pre_url = self._page.url
-                            await fortsetzen_btn.evaluate("el => el.click()")
-                            for _wait in range(10):
-                                await asyncio.sleep(1)
-                                if self._page.url != pre_url:
-                                    break
-                            await asyncio.sleep(2)
-                            await self.screenshot("after_fortsetzen_direct")
-
-                            # Check if actually submitted vs redirected to external form
-                            final_text = ""
-                            try:
-                                final_text = (await self._page.inner_text("body")).lower()
-                            except:
-                                pass
-                            final_url = self._page.url
-
-                            success = any(kw in final_text for kw in [
-                                "bewerbung abgeschickt", "application sent", "erfolgreich",
-                                "vielen dank", "thank you", "gesendet", "submitted",
-                                "bewerbung wurde", "application has been",
-                            ]) or "success" in final_url or "confirmation" in final_url
-
-                            # Check for external redirect (company's own form)
-                            is_external = (
-                                "brought to you by stepstone" in final_text
-                                or "no listing title" in final_text
-                                or "apply" in final_url and "external" in final_url
-                            )
-
-                            if not success and not is_external:
-                                # Check if the continue button is gone (probable success)
-                                still_has = await self._page.query_selector('button:has-text("Bewerbung fortsetzen")')
-                                summary_still = await self._page.query_selector('button:has-text("Continue application")')
-                                if not still_has and not summary_still:
-                                    success = True
-
-                            if is_external:
-                                application.status = "external"
-                                application.error_log = "Redirected to company external form"
-                                self.stats["external"] = self.stats.get("external", 0) + 1
-                                apply_duration = time.time() - t0
-                                await self.log("warn", "apply", "external_redirect", {
-                                    "message": f"  EXTERNAL — Redirected to company form, needs manual apply ({apply_duration:.0f}s)",
-                                    "url": final_url,
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-                            elif success:
-                                application.status = "success"
-                                self.stats["applied"] += 1
-                                apply_duration = time.time() - t0
-                                await self.log("info", "apply", "success", {
-                                    "message": f"  SUCCESS — Submitted via \"{btn_label}\" ({apply_duration:.0f}s)",
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-                            else:
-                                application.status = "failed"
-                                self.stats["failed"] += 1
-                                apply_duration = time.time() - t0
-                                application.error_log = "Submit not confirmed after clicking continue"
-                                await self.log("warn", "apply", "submit_uncertain", {
-                                    "message": f"  UNCERTAIN — Clicked \"{btn_label}\" but no confirmation ({apply_duration:.0f}s)",
-                                    "url": final_url,
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-
-                            db.commit()
-                            await self.emit_progress()
-                            if i < len(jobs) - 1 and self.running:
-                                delay = random.uniform(15, 25)
-                                await self.log("info", "system", "delay", {
-                                    "message": f"  Waiting {delay:.0f}s before next application...",
-                                    "delay_s": delay,
-                                })
-                                await asyncio.sleep(delay)
-                            continue
-
-                    # No summary detected — dismiss popups and re-check page
-                    try:
-                        await self._dismiss_popups()
-                    except:
-                        pass
-                    await asyncio.sleep(1)
-                    try:
-                        page_text = (await self._page.inner_text("body")).lower()
-                    except:
-                        pass
-
-                    # First check: are we already on the SUCCESS/confirmation page?
-                    # (Some jobs auto-submit interest without showing summary)
-                    is_confirmed = any(kw in page_text for kw in [
-                        # English
-                        "did all go well", "application sent", "thank you",
-                        # German
-                        "hat alles geklappt", "eckdaten zur bewerbung",
-                        "bewerbung abgeschickt", "vielen dank",
-                        "deine bewerbungen auf einen blick",
-                        "falls nicht, kannst du dich auf der unternehmenswebsite",
-                        # WhatsApp popup (only appears after successful submission)
-                        "so kommst du schneller zum richtigen job",
-                    ])
-
-                    if is_confirmed:
-                        application.status = "success"
-                        self.stats["applied"] += 1
-                        apply_duration = time.time() - t0
-                        await self.log("info", "apply", "success", {
-                            "message": f"  SUCCESS — Interest auto-submitted, confirmation page detected ({apply_duration:.0f}s)",
-                            "duration_s": apply_duration,
-                        }, job_id=job.id, platform=job.platform)
-                        db.commit()
-                        await self.emit_progress()
-                        if i < len(jobs) - 1 and self.running:
-                            delay = random.uniform(15, 25)
-                            await self.log("info", "system", "delay", {
-                                "message": f"  Waiting {delay:.0f}s before next application...",
-                                "delay_s": delay,
-                            })
-                            await asyncio.sleep(delay)
-                        continue
-
-                    # Check if we're actually on the summary page (missed by the loop above)
-                    late_summary = any(kw in page_text for kw in [
-                        "application summary", "zusammenfassung",
-                        "continue application", "bewerbung fortsetzen",
-                        "edit application", "bewerbung bearbeiten",
-                        "haupt-lebenslauf", "kontaktdaten", "your default cv",
-                    ])
-
-                    if late_summary:
-                        await self.log("info", "apply", "late_summary_detected", {
-                            "message": "  Summary page detected (late render) — clicking 'Continue application'...",
-                        }, job_id=job.id, platform=job.platform)
-                        # Click "Continue application" / "Bewerbung fortsetzen"
-                        fortsetzen_btn = None
-                        for sel in [
-                            'button:has-text("Bewerbung fortsetzen")',
-                            'a:has-text("Bewerbung fortsetzen")',
-                            'button:has-text("Continue application")',
-                            'a:has-text("Continue application")',
-                            'button:has-text("Bewerbung abschicken")',
-                        ]:
-                            fortsetzen_btn = await self._page.query_selector(sel)
-                            if fortsetzen_btn and await fortsetzen_btn.is_visible():
-                                break
-                            fortsetzen_btn = None
-
-                        if fortsetzen_btn:
-                            btn_label = (await fortsetzen_btn.inner_text()).strip()
-                            await self.log("info", "apply", "submitting", {
-                                "message": f"  Clicking \"{btn_label}\"...",
-                            }, job_id=job.id, platform=job.platform)
-                            await fortsetzen_btn.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.5)
-                            pre_url = self._page.url
-                            await fortsetzen_btn.evaluate("el => el.click()")
-                            for _wait in range(10):
-                                await asyncio.sleep(1)
-                                if self._page.url != pre_url:
-                                    break
-                            await asyncio.sleep(2)
-                            await self.screenshot("after_late_summary_submit")
-
-                            # Check result
-                            final_text = ""
-                            try:
-                                final_text = (await self._page.inner_text("body")).lower()
-                            except:
-                                pass
-                            final_url = self._page.url
-
-                            success = any(kw in final_text for kw in [
-                                "bewerbung abgeschickt", "application sent", "erfolgreich",
-                                "vielen dank", "thank you", "gesendet", "submitted",
-                                "bewerbung wurde", "application has been",
-                                "did all go well", "hat alles geklappt",
-                            ]) or "success" in final_url or "confirmation" in final_url
-
-                            is_external = (
-                                "zur verfügung gestellt von stepstone" in final_text
-                                or "brought to you by stepstone" in final_text
-                                or "no listing title" in final_text
-                                or "sie bewerben sich" in final_text and "stepstone" in final_text
-                            )
-
-                            if not success and not is_external:
-                                still_has = await self._page.query_selector('button:has-text("Bewerbung fortsetzen")')
-                                if not still_has:
-                                    still_has = await self._page.query_selector('button:has-text("Continue application")')
-                                if not still_has:
-                                    success = True
-
-                            if is_external:
-                                application.status = "external"
-                                application.error_log = "Redirected to company external form"
-                                self.stats["external"] = self.stats.get("external", 0) + 1
-                                apply_duration = time.time() - t0
-                                await self.log("warn", "apply", "external_redirect", {
-                                    "message": f"  EXTERNAL — Redirected to company form ({apply_duration:.0f}s)",
-                                    "url": final_url,
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-                            elif success:
-                                application.status = "success"
-                                self.stats["applied"] += 1
-                                apply_duration = time.time() - t0
-                                await self.log("info", "apply", "success", {
-                                    "message": f"  SUCCESS — Application submitted via late summary ({apply_duration:.0f}s)",
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-                            else:
-                                application.status = "failed"
-                                self.stats["failed"] += 1
-                                apply_duration = time.time() - t0
-                                application.error_log = "Submit not confirmed after clicking continue"
-                                await self.log("warn", "apply", "submit_uncertain", {
-                                    "message": f"  UNCERTAIN — No confirmation after clicking continue ({apply_duration:.0f}s)",
-                                    "url": final_url,
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-
-                            db.commit()
-                            await self.emit_progress()
-                            if i < len(jobs) - 1 and self.running:
-                                delay = random.uniform(15, 25)
-                                await self.log("info", "system", "delay", {
-                                    "message": f"  Waiting {delay:.0f}s before next application...",
-                                    "delay_s": delay,
-                                })
-                                await asyncio.sleep(delay)
-                            continue
-                        else:
-                            # Summary page but can't find continue button
-                            application.status = "failed"
-                            self.stats["failed"] += 1
-                            application.error_log = "Summary page detected but no Continue button found"
-                            await self.log("warn", "apply", "no_continue_btn", {
-                                "message": "  Summary page detected but no Continue button found",
-                            }, job_id=job.id, platform=job.platform)
-                            db.commit()
-                            await self.emit_progress()
-                            if i < len(jobs) - 1 and self.running:
-                                delay = random.uniform(15, 25)
-                                await self.log("info", "system", "delay", {
-                                    "message": f"  Waiting {delay:.0f}s before next application...",
-                                    "delay_s": delay,
-                                })
-                                await asyncio.sleep(delay)
-                            continue
-
-                    # No summary at all — check if interest was registered directly
-                    interest_confirmed = any(kw in page_text for kw in [
-                        "interesse wurde", "interesse bekundet", "interest has been",
-                        "interest expressed", "already applied", "bereits beworben",
-                        "did all go well", "hat alles geklappt",
-                        "eckdaten zur bewerbung", "deine bewerbungen auf einen blick",
-                        "so kommst du schneller zum richtigen job",
-                        "bewerbung abgeschickt", "vielen dank",
-                    ])
-                    if not interest_confirmed:
-                        btn_still = None
-                        for sel in [
-                            'button:has-text("Ich bin interessiert")',
-                            "button:has-text(\"I'm interested\")",
-                        ]:
-                            btn_still = await self._page.query_selector(sel)
-                            if btn_still:
-                                is_disabled = await btn_still.get_attribute("disabled")
-                                aria_disabled = await btn_still.get_attribute("aria-disabled")
-                                if is_disabled is not None or aria_disabled == "true":
-                                    interest_confirmed = True
-                                break
-                        # Button gone but could be on an unknown page — DON'T assume success
-                        if not btn_still:
-                            # Extra check: are we on a confirmation page?
-                            is_confirmation = any(kw in page_text for kw in [
-                                "did all go well", "hat alles geklappt",
-                                "bewerbung abgeschickt", "application sent",
-                                "vielen dank", "thank you",
-                            ])
-                            if is_confirmation:
-                                interest_confirmed = True
-                            else:
-                                await self.log("warn", "apply", "button_gone_uncertain", {
-                                    "message": "  Button gone but no confirmation — marking failed",
-                                    "url": self._page.url,
-                                }, job_id=job.id, platform=job.platform)
-                                application.status = "failed"
-                                self.stats["failed"] += 1
-                                application.error_log = "Interest button disappeared but no confirmation detected"
-                                db.commit()
-                                await self.emit_progress()
-                                if i < len(jobs) - 1 and self.running:
-                                    delay = random.uniform(15, 25)
-                                    await self.log("info", "system", "delay", {
-                                        "message": f"  Waiting {delay:.0f}s before next application...",
-                                        "delay_s": delay,
-                                    })
-                                    await asyncio.sleep(delay)
-                                continue
-
-                    if interest_confirmed:
-                        application.status = "success"
-                        self.stats["applied"] += 1
-                        apply_duration = time.time() - t0
-                        await self.log("info", "apply", "success", {
-                            "message": f"  SUCCESS — Interest registered (Schnellbewerbung) in {apply_duration:.0f}s",
-                            "duration_s": apply_duration,
-                        }, job_id=job.id, platform=job.platform)
-                        db.commit()
-                        await self.emit_progress()
-
-                        if i < len(jobs) - 1 and self.running:
-                            delay = random.uniform(15, 25)
-                            await self.log("info", "system", "delay", {
-                                "message": f"  Waiting {delay:.0f}s before next application...",
-                                "delay_s": delay,
-                            })
-                            await asyncio.sleep(delay)
-                        continue
-
-                # ── Non-interest (full apply) path ──
-                if apply_type != "interest":
-                    await self._dismiss_consent()
-                    await self._dismiss_popups()
-                    current_url = self._page.url
-                    await self.screenshot("after_apply_click")
-
-                # Check if we landed on success/confirmation page (Flow B: direct success)
+                # Check if landed on success/confirmation page
                 if "confirmation/success" in current_url or "success" in current_url:
-                    application.status = "success"
-                    self.stats["applied"] += 1
-                    apply_duration = time.time() - t0
-                    await self.log("info", "apply", "success", {
-                        "message": f"  SUCCESS — Application auto-submitted in {apply_duration:.0f}s",
-                        "duration_s": apply_duration,
-                    }, job_id=job.id, platform=job.platform)
-                    db.commit()
-                    await self.emit_progress()
-
-                    if i < len(jobs) - 1 and self.running:
-                        delay = random.uniform(15, 25)
-                        await self.log("info", "system", "delay", {
-                            "message": f"  Waiting {delay:.0f}s before next...",
-                            "delay_s": delay,
-                        })
-                        await asyncio.sleep(delay)
+                    await self._ss_record_result(application, db, "success", "", t0, job, i, len(jobs))
                     continue
 
-                # Smart Apply flow (Flow A): form with "Bewerbung abschicken"
+                # Check if landed on Smart Apply form
                 if "smart-apply" in current_url or "application" in current_url:
-                    await self.log("info", "apply", "smart_apply_form", {
-                        "message": "  Smart Apply form loaded — submitting application...",
-                        "url": current_url[:100],
-                    }, job_id=job.id, platform=job.platform)
-
-                    await asyncio.sleep(random.uniform(2, 4))
-                    await self._dismiss_consent()
-                    await self._dismiss_popups()
-
-                    # Upload our selected CV to any file inputs on the Smart Apply form
-                    cv_path = profile.get("cv_path")
-                    if cv_path and os.path.exists(cv_path):
-                        try:
-                            file_inputs = await self._page.query_selector_all('input[type="file"]')
-                            for fi in file_inputs:
-                                try:
-                                    await fi.set_input_files(cv_path)
-                                    await self.log("info", "form", "cv_uploaded", {
-                                        "message": f"  Uploaded CV: {os.path.basename(cv_path)}",
-                                    }, job_id=job.id, platform=job.platform)
-                                    await asyncio.sleep(1)
-                                except Exception as e:
-                                    await self.log("warn", "form", "cv_upload_error", {
-                                        "message": f"  CV upload failed: {e}",
-                                    }, job_id=job.id, platform=job.platform)
-                        except:
-                            pass
-
-                        # Also try clicking any "Upload CV" / "Lebenslauf hochladen" button
-                        for upload_sel in [
-                            'button:has-text("Upload")', 'button:has-text("Hochladen")',
-                            'button:has-text("Lebenslauf")', 'button:has-text("CV")',
-                            'label:has-text("Upload")', 'label:has-text("Hochladen")',
-                            '[data-testid*="upload"]', '[data-testid*="cv"]',
-                        ]:
-                            try:
-                                upload_btn = await self._page.query_selector(upload_sel)
-                                if upload_btn and await upload_btn.is_visible():
-                                    # Check if this button has an associated file input
-                                    for_id = await upload_btn.get_attribute("for")
-                                    if for_id:
-                                        fi = await self._page.query_selector(f'input#{for_id}')
-                                        if fi:
-                                            await fi.set_input_files(cv_path)
-                                            await self.log("info", "form", "cv_uploaded_via_label", {
-                                                "message": f"  Uploaded CV via label: {os.path.basename(cv_path)}",
-                                            }, job_id=job.id, platform=job.platform)
-                                            await asyncio.sleep(1)
-                                            break
-                            except:
-                                continue
-
-                    # Find and click "Bewerbung abschicken" / "Submit application"
-                    submit_btn = None
-                    for sel in [
-                        'button:has-text("Bewerbung abschicken")',
-                        'button:has-text("Submit application")',
-                        'button:has-text("Send application")',
-                        'button:has-text("Jetzt bewerben")',
-                        'button:has-text("Apply now")',
-                        'button:has-text("Absenden")',
-                        'button:has-text("Submit")',
-                        'button:has-text("Senden")',
-                        'button:has-text("Send")',
-                        'button[type="submit"]',
-                    ]:
-                        submit_btn = await self._page.query_selector(sel)
-                        if submit_btn and await submit_btn.is_visible():
-                            break
-                        submit_btn = None
-
-                    if submit_btn:
-                        submit_text = (await submit_btn.inner_text()).strip()
-                        await self.log("info", "apply", "submitting", {
-                            "message": f"  Clicking \"{submit_text}\"...",
-                        }, job_id=job.id, platform=job.platform)
-                        await submit_btn.scroll_into_view_if_needed()
-                        await asyncio.sleep(0.5)
-                        pre_submit_url = self._page.url
-                        # Primary: el.click() (more reliable on StepStone React)
-                        await submit_btn.evaluate("el => el.click()")
-                        # Wait for navigation or page change
-                        for _wait in range(8):
-                            await asyncio.sleep(1)
-                            if self._page.url != pre_submit_url:
-                                break
-                        await asyncio.sleep(random.uniform(1, 2))
-                        await self.screenshot("after_submit")
-
-                        # Check for success
-                        after_url = self._page.url
-                        page_text = (await self._page.inner_text("body")).lower()
-                        success = any(kw in page_text for kw in [
-                            "bewerbung abgeschickt", "application sent", "erfolgreich",
-                            "vielen dank", "thank you", "gesendet", "submitted",
-                            "bewerbung wurde", "application has been",
-                        ])
-                        if success or "success" in after_url or "confirmation" in after_url:
-                            application.status = "success"
-                            self.stats["applied"] += 1
-                            apply_duration = time.time() - t0
-                            await self.log("info", "apply", "success", {
-                                "message": f"  SUCCESS — Application submitted in {apply_duration:.0f}s",
-                                "duration_s": apply_duration,
-                            }, job_id=job.id, platform=job.platform)
-                        else:
-                            # Might still have succeeded — check if button disappeared
-                            still_has_submit = (
-                                await self._page.query_selector('button:has-text("Bewerbung abschicken")') or
-                                await self._page.query_selector('button:has-text("Submit application")') or
-                                await self._page.query_selector('button:has-text("Send application")')
-                            )
-                            if not still_has_submit:
-                                application.status = "success"
-                                self.stats["applied"] += 1
-                                apply_duration = time.time() - t0
-                                await self.log("info", "apply", "probable_success", {
-                                    "message": f"  Probably submitted — submit button gone ({apply_duration:.0f}s)",
-                                    "duration_s": apply_duration,
-                                }, job_id=job.id, platform=job.platform)
-                            else:
-                                application.status = "failed"
-                                application.error_log = "Submit button still present — may not have submitted"
-                                self.stats["failed"] += 1
-                                await self.log("warn", "apply", "submit_uncertain", {
-                                    "message": "  Submit button still visible — application may not have gone through",
-                                }, job_id=job.id, platform=job.platform)
-                    else:
-                        # No submit button found — might need to fill form first
-                        await self.log("warn", "apply", "no_submit_button", {
-                            "message": "  Smart Apply form loaded but no submit button found",
-                            "url": current_url[:100],
-                        }, job_id=job.id, platform=job.platform)
-                        application.status = "failed"
-                        application.error_log = "No submit button on smart-apply form"
-                        self.stats["failed"] += 1
-
-                    db.commit()
-                    await self.emit_progress()
-
-                    if i < len(jobs) - 1 and self.running:
-                        delay = random.uniform(15, 25)
-                        await self.log("info", "system", "delay", {
-                            "message": f"  Waiting {delay:.0f}s before next application...",
-                            "delay_s": delay,
-                        })
-                        await asyncio.sleep(delay)
+                    status, error_log = await self._ss_handle_smart_apply(profile, job)
+                    await self._ss_record_result(application, db, status, error_log, t0, job, i, len(jobs))
                     continue
 
-                # Full application — check if redirected to login
-                page_text = await self._page.inner_text("body")
-                if ("anmelden" in page_text.lower() or "einloggen" in page_text.lower()) and "login" in self._page.url.lower():
-                    if not logged_in:
-                        await self.log("warn", "apply", "login_required", {
-                            "message": "  Login required — no credentials configured",
-                        }, job_id=job.id, platform=job.platform)
-                    else:
+                # Check if redirected to login
+                page_text = await self._ss_get_page_text()
+                if ("anmelden" in page_text or "einloggen" in page_text) and "login" in self._page.url.lower():
+                    if logged_in:
                         await self.log("warn", "apply", "login_expired", {
                             "message": "  Session expired — re-logging in...",
                         }, job_id=job.id, platform=job.platform)
                         logged_in = await self._login_stepstone(self._page, ss_cred)
                         if logged_in:
-                            await self._page.goto(_to_short_url(job.url), timeout=20000)
+                            await self._page.goto(ss_to_short_url(job.url), timeout=20000)
                             await asyncio.sleep(2)
                             continue
-
-                    application.status = "skipped"
-                    application.error_log = "Login required"
-                    db.commit()
-                    self.stats["skipped"] += 1
-                    await self.emit_progress()
+                    await self._ss_record_result(application, db, "skipped", "Login required", t0, job, i, len(jobs))
                     continue
 
-                # Detect and fill form (full application only)
+                # Standard form — detect and fill
                 await self.log("info", "form", "detecting", {
                     "message": "  Scanning form fields...",
                 }, job_id=job.id, platform=job.platform)
@@ -2554,27 +2191,11 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         }, job_id=job.id, platform=job.platform)
                         await submit.click()
                         await asyncio.sleep(3)
-
-                    application.status = "success"
-                    self.stats["applied"] += 1
-                    apply_duration = time.time() - t0
-                    await self.log("info", "apply", "success", {
-                        "message": f"  SUCCESS — {form_result['filled']} fields filled in {apply_duration:.0f}s",
-                        "fields_filled": form_result["filled"],
-                        "duration_s": apply_duration,
-                    }, job_id=job.id, platform=job.platform)
+                    await self._ss_record_result(application, db, "success", "", t0, job, i, len(jobs))
                 else:
-                    application.status = "failed"
-                    application.error_log = f"No fields matched. Unmatched: {form_result['unmatched'][:5]}"
-                    self.stats["failed"] += 1
-                    await self.log("warn", "apply", "no_fields_matched", {
-                        "message": f"  FAILED — no fields could be matched",
-                        "unmatched": form_result["unmatched"],
-                    }, job_id=job.id, platform=job.platform)
-
-                db.commit()
-                await self.emit_progress()
-
+                    await self._ss_record_result(application, db, "failed",
+                                                 f"No fields matched. Unmatched: {form_result['unmatched'][:5]}",
+                                                 t0, job, i, len(jobs))
             except Exception as e:
                 application.status = "failed"
                 application.error_log = str(e)[:500]
@@ -2703,7 +2324,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if pw_input:
                 await pw_input.click()
                 await asyncio.sleep(0.3)
-                await pw_input.type(cred.password_encrypted, delay=random.randint(30, 80))
+                await pw_input.type(cred.get_password(), delay=random.randint(30, 80))
                 await self.log("info", "apply", "login_password", {
                     "message": "  Entered password",
                 }, platform="xing")
@@ -3008,9 +2629,30 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if step_sig == last_step_sig:
                 stuck_count += 1
                 if stuck_count >= 2:
-                    await self.log("warn", "apply", "xing_ea_stuck_loop", {
-                        "message": f"  Stuck on same step for {stuck_count+1} iterations — aborting",
-                    }, job_id=job.id, platform="xing")
+                    # Log diagnostic: what's visible on the stuck page
+                    try:
+                        diag = await page.evaluate("""() => {
+                            const info = {};
+                            info.checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"]'))
+                                .filter(el => el.offsetParent !== null)
+                                .map(el => ({checked: el.checked || el.getAttribute('aria-checked') === 'true', label: (el.closest('label') || el.parentElement)?.innerText?.trim()?.slice(0, 60) || ''}));
+                            info.buttons = Array.from(document.querySelectorAll('button'))
+                                .filter(el => el.offsetParent !== null)
+                                .map(el => ({text: el.innerText.trim().slice(0, 40), enabled: !el.disabled}));
+                            info.inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea, select'))
+                                .filter(el => el.offsetParent !== null)
+                                .map(el => ({tag: el.tagName, type: el.type || '', value: (el.value || '').slice(0, 20), name: (el.name || '').slice(0, 30)}));
+                            info.errors = Array.from(document.querySelectorAll('[class*="error"], [class*="invalid"]'))
+                                .map(el => el.innerText?.trim()?.slice(0, 80)).filter(t => t);
+                            return info;
+                        }""")
+                        await self.log("warn", "apply", "xing_ea_stuck_loop", {
+                            "message": f"  Stuck on same step for {stuck_count+1} iterations — aborting. Page: {diag}",
+                        }, job_id=job.id, platform="xing")
+                    except:
+                        await self.log("warn", "apply", "xing_ea_stuck_loop", {
+                            "message": f"  Stuck on same step for {stuck_count+1} iterations — aborting",
+                        }, job_id=job.id, platform="xing")
                     return (False, f"Stuck on same step (repeated {stuck_count+1} times)")
             else:
                 stuck_count = 0
@@ -3027,35 +2669,182 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 return (True, "")
 
             # ── 1-click apply: "Send application" / "Apply with CV" ──
-            # When logged in, Xing pre-fills profile data — just click Send
+            send_btn = None
+            send_btn_text = ""
             for sel in ['button:has-text("Send application")', 'button:has-text("Bewerbung senden")',
                         'button:has-text("Bewerbung abschicken")', 'button:has-text("Apply")',
                         'button:has-text("Bewerben")']:
                 btn = await page.query_selector(sel)
                 if btn and await btn.is_visible():
                     btn_text = (await btn.inner_text()).strip()
-                    # Only click actual submit buttons, not "Easy apply" or "Edit" links
                     if any(kw in btn_text.lower() for kw in ["send", "senden", "abschicken", "apply", "bewerben"]) \
                        and "edit" not in btn_text.lower() and "easy" not in btn_text.lower():
-                        await self.log("info", "apply", "xing_ea_1click", {
-                            "message": f"  Step {step+1}: Clicking \"{btn_text}\" (1-click apply)",
-                        }, job_id=job.id, platform="xing")
-                        await btn.click()
-                        await asyncio.sleep(3)
-                        # Check confirmation
-                        try:
-                            confirm = (await page.inner_text("body")).lower()
-                            if any(kw in confirm for kw in success_kw):
-                                await self.screenshot("xing_ea_success")
-                                return (True, "")
-                            # Button might have submitted and page changed
-                            still_has_send = await page.query_selector(sel)
-                            if not still_has_send or not await still_has_send.is_visible():
-                                await self.screenshot("xing_ea_success")
-                                return (True, "")
-                        except:
-                            return (True, "")
+                        send_btn = btn
+                        send_btn_text = btn_text
                     break
+
+            if send_btn:
+                # If CV needs updating, click "Edit your application" first to swap it
+                if cv_path and os.path.exists(cv_path) and getattr(self, '_xing_cv_needs_update', False):
+                    await self.screenshot("xing_ea_1click_page")
+
+                    # Method 1: CSS selectors (Playwright :has-text is partial match)
+                    edit_clicked = False
+                    for esel in [
+                        'a:has-text("Edit your application")', 'a:has-text("Bewerbung bearbeiten")',
+                        'button:has-text("Edit your application")', 'button:has-text("Bewerbung bearbeiten")',
+                        'a:has-text("Bearbeiten")', 'a:has-text("Edit application")',
+                        'span:has-text("Edit your application")', 'span:has-text("Bewerbung bearbeiten")',
+                        '[data-testid*="edit"] a', '[data-qa*="edit"] a',
+                    ]:
+                        eb = await page.query_selector(esel)
+                        if eb and await eb.is_visible():
+                            await eb.click()
+                            edit_clicked = True
+                            await self.log("info", "apply", "xing_ea_edit_cv", {
+                                "message": f"  Step {step+1}: Clicked Edit via CSS selector: {esel}",
+                            }, job_id=job.id, platform="xing")
+                            break
+
+                    # Method 2: JS text search — finds any clickable element with edit text
+                    if not edit_clicked:
+                        js_result = await page.evaluate("""() => {
+                            const editTexts = ['edit your application', 'bewerbung bearbeiten',
+                                               'edit application', 'bearbeiten'];
+                            const elems = [...document.querySelectorAll('a, button, span, div, li')]
+                                .filter(el => el.offsetParent !== null);
+                            for (const el of elems) {
+                                const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                                if (editTexts.some(t => text === t || (text.includes(t) && text.length < 60))) {
+                                    el.click();
+                                    return {clicked: true, text: text, tag: el.tagName};
+                                }
+                            }
+                            // Return diagnostic info
+                            const visible = elems
+                                .map(el => ({tag: el.tagName, text: (el.innerText||'').trim().substring(0, 60)}))
+                                .filter(x => x.text.length > 0 && x.text.length < 80)
+                                .slice(0, 20);
+                            return {clicked: false, visible: visible};
+                        }""")
+                        if js_result and js_result.get("clicked"):
+                            edit_clicked = True
+                            await self.log("info", "apply", "xing_ea_edit_cv", {
+                                "message": f"  Step {step+1}: Clicked Edit via JS: {js_result.get('tag')} '{js_result.get('text')}'",
+                            }, job_id=job.id, platform="xing")
+                        else:
+                            await self.log("warn", "apply", "xing_ea_no_edit", {
+                                "message": f"  No Edit button found. Visible elements: {js_result.get('visible', [])[:10]}",
+                            }, job_id=job.id, platform="xing")
+
+                    if edit_clicked:
+                        await asyncio.sleep(3)
+                        await self.screenshot("xing_ea_after_edit")
+
+                        # Navigate through wizard to find & replace CV
+                        cv_replaced = False
+                        for wstep in range(8):
+                            await asyncio.sleep(2)
+                            await self.screenshot(f"xing_ea_edit_step{wstep}")
+
+                            # Look for file input (visible or hidden)
+                            file_count = await page.evaluate("""() => document.querySelectorAll('input[type="file"]').length""")
+                            if file_count > 0:
+                                # Unhide hidden inputs
+                                await page.evaluate("""() => {
+                                    document.querySelectorAll('input[type="file"]').forEach(i => {
+                                        i.style.display = 'block'; i.style.opacity = '1';
+                                        i.style.position = 'static'; i.style.width = '200px'; i.style.height = '30px';
+                                    });
+                                }""")
+                                await asyncio.sleep(0.5)
+                                file_inputs = await page.query_selector_all('input[type="file"]')
+                                if file_inputs:
+                                    await file_inputs[0].set_input_files(cv_path)
+                                    await asyncio.sleep(3)
+                                    await self.screenshot("xing_ea_cv_uploaded")
+                                    await self.log("info", "apply", "xing_ea_cv_replaced", {
+                                        "message": f"  CV replaced at wizard step {wstep+1}: {os.path.basename(cv_path)}",
+                                    }, job_id=job.id, platform="xing")
+                                    cv_replaced = True
+                                    self._xing_cv_needs_update = False
+
+                            # If CV replaced, navigate forward to submit
+                            if cv_replaced:
+                                for fwd in range(6):
+                                    await asyncio.sleep(2)
+                                    # Try send/submit
+                                    for ss in ['button:has-text("Send application")', 'button:has-text("Bewerbung senden")',
+                                               'button:has-text("Bewerbung abschicken")', 'button:has-text("Submit")',
+                                               'button:has-text("Absenden")']:
+                                        sb = await page.query_selector(ss)
+                                        if sb and await sb.is_visible():
+                                            await sb.click()
+                                            await asyncio.sleep(3)
+                                            await self.screenshot("xing_ea_cv_submit")
+                                            try:
+                                                confirm = (await page.inner_text("body")).lower()
+                                                if any(kw in confirm for kw in success_kw):
+                                                    return (True, "")
+                                            except:
+                                                pass
+                                            return (True, "")
+                                    # Try next/continue/review
+                                    for ns in ['button:has-text("Continue")', 'button:has-text("Weiter")',
+                                               'button:has-text("Next")', 'button:has-text("Fortfahren")',
+                                               'button:has-text("Review")', 'button:has-text("Überprüfen")',
+                                               'button:has-text("Bewerbung überprüfen")']:
+                                        nb = await page.query_selector(ns)
+                                        if nb and await nb.is_visible():
+                                            await nb.click()
+                                            break
+                                break  # Exit wstep loop after CV replaced + submit attempt
+
+                            # No file input yet — try to advance to next wizard step
+                            advanced = False
+                            for ns in ['button:has-text("Continue")', 'button:has-text("Weiter")',
+                                       'button:has-text("Next")', 'button:has-text("Fortfahren")']:
+                                nb = await page.query_selector(ns)
+                                if nb and await nb.is_visible():
+                                    await nb.click()
+                                    advanced = True
+                                    break
+                            if not advanced:
+                                buttons = await page.evaluate("""() => {
+                                    return [...document.querySelectorAll('button, a')]
+                                        .filter(b => b.offsetParent !== null)
+                                        .map(b => b.innerText.trim().substring(0, 50))
+                                        .filter(t => t.length > 0);
+                                }""")
+                                await self.log("warn", "apply", "xing_ea_edit_stuck", {
+                                    "message": f"  Edit wizard stuck at step {wstep+1}. Buttons: {buttons[:10]}",
+                                }, job_id=job.id, platform="xing")
+                                break
+
+                        if cv_replaced:
+                            continue  # Go back to main step loop (already submitted)
+                        # CV not replaced — fall through to click Send with old CV
+                        await self.log("warn", "apply", "xing_ea_cv_not_replaced", {
+                            "message": f"  Could not replace CV in wizard. Submitting with existing CV.",
+                        }, job_id=job.id, platform="xing")
+
+                # CV is already correct (or couldn't update) — just click Send
+                await self.log("info", "apply", "xing_ea_1click", {
+                    "message": f"  Step {step+1}: Clicking \"{send_btn_text}\" (1-click apply)",
+                }, job_id=job.id, platform="xing")
+                await send_btn.click()
+                await asyncio.sleep(3)
+                try:
+                    confirm = (await page.inner_text("body")).lower()
+                    if any(kw in confirm for kw in success_kw):
+                        await self.screenshot("xing_ea_success")
+                        return (True, "")
+                    still_has_send = await page.query_selector('button:has-text("Send application")')
+                    if not still_has_send or not await still_has_send.is_visible():
+                        await self.screenshot("xing_ea_success")
+                        return (True, "")
+                except:
+                    return (True, "")
 
             # ── Detect which step we're on and fill fields ──
 
@@ -3113,12 +2902,11 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 }, job_id=job.id, platform="xing")
 
             # Step: Document upload — only match when there's an actual file input or upload button visible
-            elif await page.query_selector('input[type="file"]') or any(
-                await page.query_selector(s) for s in [
-                    'button:has-text("Upload")', 'button:has-text("Hochladen")',
-                    'button:has-text("Lebenslauf")', '[data-testid*="upload"]'
-                ]
-            ):
+            elif await page.query_selector('input[type="file"]') or \
+                await page.query_selector('button:has-text("Upload")') or \
+                await page.query_selector('button:has-text("Hochladen")') or \
+                await page.query_selector('button:has-text("Lebenslauf")') or \
+                await page.query_selector('[data-testid*="upload"]'):
                 # Check if a CV is already attached from the Xing profile
                 already_attached = await page.evaluate("""() => {
                     const body = document.body.innerText.toLowerCase();
@@ -3135,10 +2923,40 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     return !!(hasFile || hasRemoveBtn || hasFilename || hasAttachedText);
                 }""")
 
-                if already_attached:
+                # If we have a selected CV, always replace (even if one is pre-attached)
+                if already_attached and cv_path and os.path.exists(cv_path):
+                    # Remove the pre-attached CV first so we can upload the correct one
+                    try:
+                        for rm_sel in [
+                            'button[aria-label*="remove"]', 'button[aria-label*="delete"]',
+                            'button[aria-label*="entfernen"]', 'button[aria-label*="löschen"]',
+                            'button:has-text("Entfernen")', 'button:has-text("Löschen")',
+                            'button:has-text("Remove")', 'button:has-text("Delete")',
+                            '[data-testid*="remove"]', '[data-testid*="delete"]',
+                        ]:
+                            rm_btn = await page.query_selector(rm_sel)
+                            if rm_btn and await rm_btn.is_visible():
+                                await rm_btn.click()
+                                await asyncio.sleep(1)
+                                await self.log("info", "apply", "xing_ea_cv_removed", {
+                                    "message": f"  Step {step+1}: Removed pre-attached CV to replace with selected one",
+                                }, job_id=job.id, platform="xing")
+                                already_attached = False
+                                break
+                    except:
+                        pass
+
+                if already_attached and not cv_path:
+                    # No specific CV selected — keep the pre-attached one
                     await self.log("info", "apply", "xing_ea_cv", {
-                        "message": f"  Step {step+1}: CV already attached from Xing profile",
+                        "message": f"  Step {step+1}: Using pre-attached CV from Xing profile",
                     }, job_id=job.id, platform="xing")
+                elif not cv_path:
+                    # No CV available at all — can't upload, mark failed immediately
+                    await self.log("error", "apply", "xing_ea_cv", {
+                        "message": f"  Step {step+1}: CV upload step but no CV available — skipping job",
+                    }, job_id=job.id, platform="xing")
+                    return (False, "No CV available for upload")
                 else:
                     uploaded = False
                     if cv_path and os.path.exists(cv_path):
@@ -3187,7 +3005,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 pass
 
                     await self.log("info", "apply", "xing_ea_cv", {
-                        "message": f"  Step {step+1}: CV upload {'OK' if uploaded else 'FAILED'} ({os.path.basename(cv_path) if cv_path else 'no CV'})",
+                        "message": f"  Step {step+1}: CV {'replaced with' if already_attached else 'upload'} {'OK' if uploaded else 'FAILED'} ({os.path.basename(cv_path) if cv_path else 'no CV'})",
                     }, job_id=job.id, platform="xing")
 
             # Step: Review — fill optional message, then click Apply
@@ -3226,6 +3044,148 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
                 # If we got here, Apply button might not have been found
                 await self.screenshot("xing_ea_review_stuck")
+
+            # ── Check and tick any unchecked checkboxes (consent/terms/GDPR) before advancing ──
+            try:
+                checkboxes_ticked = 0
+                # Native checkboxes
+                cbs = await page.query_selector_all("input[type='checkbox']:visible")
+                for cb in cbs:
+                    try:
+                        if not await cb.is_checked():
+                            await cb.click(force=True)
+                            checkboxes_ticked += 1
+                    except:
+                        pass
+                # Custom Xing toggle/checkbox elements (role=checkbox, data-qa)
+                custom_cbs = await page.query_selector_all("[role='checkbox']:visible, [data-qa*='checkbox']:visible")
+                for ccb in custom_cbs:
+                    try:
+                        checked = await ccb.get_attribute("aria-checked")
+                        if checked != "true":
+                            await ccb.click(force=True)
+                            checkboxes_ticked += 1
+                    except:
+                        pass
+                if checkboxes_ticked > 0:
+                    await self.log("info", "apply", "xing_ea_checkbox", {
+                        "message": f"  Step {step+1}: Ticked {checkboxes_ticked} checkbox(es)",
+                    }, job_id=job.id, platform="xing")
+                    await asyncio.sleep(0.5)
+            except:
+                pass
+
+            # ── Fill any unfilled required fields (custom questions, dropdowns, text/date/radio) ──
+            _fields_filled = 0
+            try:
+                # Date inputs (e.g. "Earliest start date") — fill with 1st of next month
+                date_inputs = await page.query_selector_all("input[type='date']:visible:not([readonly])")
+                for di in date_inputs:
+                    try:
+                        val = await di.input_value()
+                        if not val or not val.strip():
+                            import datetime as _dt
+                            _today = _dt.date.today()
+                            _next_month = _today.replace(day=1) + _dt.timedelta(days=32)
+                            _fill_date = _next_month.replace(day=1).isoformat()  # YYYY-MM-01
+                            await di.fill(_fill_date)
+                            _fields_filled += 1
+                    except:
+                        pass
+
+                # Radio buttons — select "true"/yes or first option
+                radio_groups_handled = set()
+                radio_inputs = await page.query_selector_all("input[type='radio']:visible")
+                for ri in radio_inputs:
+                    try:
+                        name = await ri.get_attribute("name") or ""
+                        if name in radio_groups_handled:
+                            continue
+                        radio_groups_handled.add(name)
+                        # Check if any radio in this group is already selected
+                        group_selected = await page.evaluate(f"""(name) => {{
+                            const radios = document.querySelectorAll('input[type="radio"][name="' + name + '"]');
+                            return Array.from(radios).some(r => r.checked);
+                        }}""", name)
+                        if not group_selected:
+                            # Try to select "true"/"yes" option first, else first option
+                            val = await ri.get_attribute("value") or ""
+                            if val.lower() in ("true", "yes", "ja"):
+                                await ri.click(force=True)
+                                _fields_filled += 1
+                            else:
+                                # Check if there's a "true" option in the group
+                                true_radio = await page.query_selector(f"input[type='radio'][name='{name}'][value='true']")
+                                if true_radio:
+                                    await true_radio.click(force=True)
+                                else:
+                                    await ri.click(force=True)  # Select first option
+                                _fields_filled += 1
+                    except:
+                        pass
+
+                # Selects — fill empty ones AND ones with "Keine" (None/placeholder) default
+                _placeholder_vals = ["keine", "none", "bitte", "please", "select", "auswählen", "-1", ""]
+                selects = await page.query_selector_all("select:visible")
+                for sel_el in selects:
+                    try:
+                        val = await sel_el.input_value()
+                        val_lower = (val or "").strip().lower()
+                        needs_fill = not val or val_lower in _placeholder_vals or any(p in val_lower for p in ["keine", "bitte auswählen", "please select"])
+                        if needs_fill:
+                            opts = await sel_el.query_selector_all("option")
+                            for opt in opts:
+                                opt_val = await opt.get_attribute("value") or ""
+                                opt_text = (await opt.inner_text()).strip().lower()
+                                # Skip placeholder/empty options and "Keine" options
+                                if not opt_val or opt_val == "-1":
+                                    continue
+                                if any(p in opt_text for p in ["select", "auswählen", "bitte", "keine", "none", "please"]):
+                                    continue
+                                await sel_el.select_option(value=opt_val)
+                                _fields_filled += 1
+                                break
+                    except:
+                        pass
+
+                # Text inputs — fill empty ones with contextual answers
+                text_inputs = await page.query_selector_all("input[type='text']:visible:not([readonly])")
+                for ti in text_inputs:
+                    try:
+                        val = await ti.input_value()
+                        if not val or not val.strip():
+                            # Try to guess from field name/label
+                            field_name = (await ti.get_attribute("name") or "").lower()
+                            placeholder = (await ti.get_attribute("placeholder") or "").lower()
+                            hint = field_name + " " + placeholder
+                            if any(kw in hint for kw in ["salary", "gehalt", "lohn"]):
+                                await ti.fill(profile.get("salary_expectation", "45000") or "45000")
+                            elif any(kw in hint for kw in ["year", "jahr", "experience", "erfahrung"]):
+                                await ti.fill(str(profile.get("years_experience", 3) or 3))
+                            else:
+                                await ti.fill("Ja")
+                            _fields_filled += 1
+                    except:
+                        pass
+
+                # Textareas — fill with generic motivation
+                textareas = await page.query_selector_all("textarea:visible:not([readonly])")
+                for ta in textareas:
+                    try:
+                        val = await ta.input_value()
+                        if not val or not val.strip():
+                            await ta.fill("Ich bin sehr interessiert an dieser Position und bringe relevante Erfahrung mit.")
+                            _fields_filled += 1
+                    except:
+                        pass
+
+                if _fields_filled > 0:
+                    await self.log("info", "apply", "xing_ea_fields_filled", {
+                        "message": f"  Step {step+1}: Filled {_fields_filled} custom question field(s)",
+                    }, job_id=job.id, platform="xing")
+                    await asyncio.sleep(0.5)
+            except:
+                pass
 
             # ── Click Continue/Next/Review button to advance ──
             clicked_next = False
@@ -3336,6 +3296,9 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             await pw.stop()
             return
 
+        # Track if we need to swap the CV on first job
+        self._xing_cv_needs_update = True
+
         for i, job in enumerate(jobs):
             if not self.running:
                 break
@@ -3428,6 +3391,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                 ]
 
                 # Try twice — first pass, then wait 3s for lazy-loaded buttons
+                _external_btn_kws = ["employer website", "arbeitgeberseite", "visit employer", "zur arbeitgeberseite"]
                 for attempt in range(2):
                     for sel in apply_selectors:
                         apply_btn = await self._page.query_selector(sel)
@@ -3436,6 +3400,10 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                                 btn_text = (await apply_btn.inner_text()).strip()
                             except:
                                 btn_text = sel
+                            # Skip "Visit employer website" links — they're external, not Easy Apply
+                            if any(kw in btn_text.lower() for kw in _external_btn_kws):
+                                apply_btn = None
+                                continue
                             break
                         apply_btn = None
                     if apply_btn:
@@ -3767,7 +3735,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if pw_input:
                 await pw_input.click()
                 await asyncio.sleep(0.3)
-                await pw_input.type(cred.password_encrypted, delay=random.randint(30, 80))
+                await pw_input.type(cred.get_password(), delay=random.randint(30, 80))
                 await self.log("info", "apply", "login_password", {
                     "message": "  Entered password",
                 }, platform="indeed")
@@ -4792,7 +4760,7 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     await pass_input.click()
                     await asyncio.sleep(0.3)
                     await pass_input.fill("")
-                    await pass_input.type(cred.password_encrypted, delay=random.randint(40, 90))
+                    await pass_input.type(cred.get_password(), delay=random.randint(40, 90))
 
                 await asyncio.sleep(random.uniform(0.5, 1))
 
@@ -5458,20 +5426,28 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
             if not modal_visible:
                 await asyncio.sleep(1)
+                await self.screenshot("linkedin_modal_closed")
+                try:
+                    body = (await page.inner_text("body")).lower()
+                except:
+                    body = ""
                 if just_clicked_submit or submitted_once:
                     error_el = await page.query_selector(".artdeco-inline-feedback--error")
                     if error_el and await error_el.is_visible():
                         return False
+                    # Verify success by checking for confirmation text on the page
+                    if any(kw in body for kw in ["application sent", "bewerbung gesendet", "application was sent", "bewerbung wurde gesendet"]):
+                        await self.log("info", "form", "modal_closed_success", {
+                            "message": f"  Modal closed — confirmed: page says application sent",
+                        }, platform="linkedin")
+                        return True
+                    # Modal closed after submit without clear confirmation — assume success
                     await self.log("info", "form", "modal_closed_success", {
-                        "message": "  Modal closed after submit — application sent",
+                        "message": f"  Modal closed after submit — assuming success (page: {body[:100]!r})",
                     }, platform="linkedin")
                     return True
-                try:
-                    body = (await page.inner_text("body")).lower()
-                    if any(kw in body for kw in ["application sent", "bewerbung gesendet", "successfully submitted"]):
-                        return True
-                except:
-                    pass
+                if any(kw in body for kw in ["application sent", "bewerbung gesendet"]):
+                    return True
                 return False
 
             just_clicked_submit = False
@@ -5484,14 +5460,17 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                     if el:
                         modal_text = (await el.inner_text()).lower()
                         break
-                if submitted_once and any(kw in modal_text for kw in [
+                success_keywords = [
                     "application sent", "bewerbung gesendet",
                     "application was sent", "bewerbung wurde gesendet",
                     "your application was submitted", "deine bewerbung wurde gesendet",
                     "successfully submitted", "erfolgreich gesendet",
-                ]):
+                ]
+                matched_kw = [kw for kw in success_keywords if kw in modal_text]
+                if submitted_once and matched_kw:
+                    await self.screenshot("linkedin_success_modal")
                     await self.log("info", "form", "success_text", {
-                        "message": "  Success text detected in modal",
+                        "message": f"  Success text detected in modal: matched={matched_kw[0]!r}, modal_preview={modal_text[:150]!r}",
                     }, platform="linkedin")
                     return True
             except:
@@ -5551,15 +5530,49 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
                         pass
 
             if error_texts:
+                error_retry_count = getattr(self, '_li_error_retry', 0)
+                self._li_error_retry = error_retry_count + 1
                 await self.log("info", "form", "errors_visible", {
-                    "message": f"  Form errors: {error_texts}",
+                    "message": f"  Form errors (attempt {self._li_error_retry}): {error_texts}",
                 }, platform="linkedin")
+                if self._li_error_retry >= 3:
+                    # Persistent errors — log unfilled fields and skip
+                    unfilled = await self._get_linkedin_unfilled_fields(page)
+                    # Also log all visible field labels for Q&A vault improvement
+                    try:
+                        all_fields = await page.evaluate("""() => {
+                            const modal = document.querySelector('[role="dialog"]') || document.querySelector('.artdeco-modal');
+                            if (!modal) return [];
+                            const fields = [];
+                            modal.querySelectorAll('input:not([type="hidden"]), textarea, select, [aria-haspopup="listbox"], [role="combobox"]').forEach(el => {
+                                if (el.offsetParent === null) return;
+                                const container = el.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                                const lbl = container ? (container.querySelector('label, legend, .fb-dash-form-element__label') || {}).innerText : '';
+                                const val = el.value || el.innerText || '';
+                                const hasErr = !!(el.getAttribute('aria-invalid') === 'true' || container?.querySelector('[class*="error"]'));
+                                fields.push({label: (lbl || '').trim().slice(0, 60), value: val.slice(0, 30), tag: el.tagName, error: hasErr});
+                            });
+                            return fields;
+                        }""")
+                        await self.log("warn", "form", "unfillable_fields", {
+                            "message": f"  Cannot fill required fields: {unfilled[:5]}. All fields: {all_fields[:8]}. Skipping job.",
+                        }, platform="linkedin")
+                    except:
+                        await self.log("warn", "form", "unfillable_fields", {
+                            "message": f"  Cannot fill required fields: {unfilled[:3]}. Skipping job.",
+                        }, platform="linkedin")
+                    self._li_error_retry = 0
+                    return False
+            else:
+                self._li_error_retry = 0
 
             # Fill fields FIRST, then click buttons
-            filled = await self._fill_linkedin_fields(page, profile, questions_json, cv_path)
+            # On error retry, also re-fill fields with aria-invalid="true"
+            force_refill = has_errors
+            filled = await self._fill_linkedin_fields(page, profile, questions_json, cv_path, force_refill=force_refill)
             if filled > 0:
                 await self.log("info", "form", "fields_filled", {
-                    "message": f"  Step {step}: filled {filled} fields",
+                    "message": f"  Step {step}: filled {filled} fields" + (" (force-refill)" if force_refill else ""),
                 }, platform="linkedin")
                 await asyncio.sleep(0.5)
 
@@ -5639,8 +5652,11 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
 
         return False
 
-    async def _fill_linkedin_fields(self, page, profile: dict, questions_json: dict, cv_path: str | None) -> int:
-        """Fill visible form fields in LinkedIn Easy Apply modal."""
+    async def _fill_linkedin_fields(self, page, profile: dict, questions_json: dict, cv_path: str | None, force_refill: bool = False) -> int:
+        """Fill visible form fields in LinkedIn Easy Apply modal.
+
+        If force_refill=True, also clear and re-fill fields with aria-invalid='true'.
+        """
         filled = 0
 
         # Text inputs
@@ -5649,15 +5665,30 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             for inp in inputs:
                 try:
                     current = await inp.input_value()
-                    if current and current.strip():
-                        continue  # Already filled
+                    is_invalid = (await inp.get_attribute("aria-invalid")) == "true"
+
+                    # Skip already-filled fields UNLESS they have validation errors
+                    if current and current.strip() and not (force_refill and is_invalid):
+                        continue
 
                     label = await self._get_linkedin_field_label(page, inp)
                     if not label:
                         continue
                     label_lower = label.lower()
 
-                    answer = self._get_linkedin_answer(label_lower, profile, questions_json)
+                    inp_type = (await inp.get_attribute("type") or "text").lower()
+                    answer = self._get_linkedin_answer(label_lower, profile, questions_json, field_type=inp_type)
+
+                    # On re-fill of invalid field, try a different answer
+                    if is_invalid and current and answer and str(answer).lower() == current.strip().lower():
+                        # Same answer would be filled again — try numeric fallback or empty the pattern cache
+                        if inp_type == "number" or any(kw in label_lower for kw in ["how many", "years", "number", "anzahl", "jahre"]):
+                            answer = str(profile.get("years_experience", 5))
+                        elif any(kw in label_lower for kw in ["salary", "gehalt"]):
+                            answer = str(profile.get("salary_expectation", 50000))
+                        else:
+                            answer = "N/A"
+
                     if answer:
                         await inp.click()
                         await asyncio.sleep(0.2)
@@ -5675,7 +5706,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             for ta in textareas:
                 try:
                     current = await ta.input_value()
-                    if current and current.strip():
+                    is_invalid = (await ta.get_attribute("aria-invalid")) == "true"
+                    if current and current.strip() and not (force_refill and is_invalid):
                         continue
                     label = await self._get_linkedin_field_label(page, ta)
                     label_lower = (label or "").lower()
@@ -5696,7 +5728,8 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             for sel in selects:
                 try:
                     current = await sel.input_value()
-                    if current and current not in ["", "-1"]:
+                    is_invalid = (await sel.get_attribute("aria-invalid")) == "true"
+                    if current and current not in ["", "-1"] and not (force_refill and is_invalid):
                         continue
                     options = await sel.query_selector_all("option")
                     # Prefer "Yes" / "Ja"
@@ -5724,31 +5757,96 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
         except:
             pass
 
-        # Custom dropdowns (LinkedIn style)
+        # Custom dropdowns (LinkedIn style) — multiple detection strategies
         try:
+            # Strategy 1: Buttons with known placeholder text
             triggers = await page.query_selector_all(
                 "button:has-text('Select an option'):visible, "
                 "div[role='button']:has-text('Select an option'):visible, "
                 "button:has-text('Option auswählen'):visible, "
-                "div[role='button']:has-text('Option auswählen'):visible"
+                "div[role='button']:has-text('Option auswählen'):visible, "
+                "button:has-text('Bitte auswählen'):visible, "
+                "button:has-text('Please select'):visible"
             )
+            # Strategy 2: aria-haspopup listbox triggers that haven't been selected
+            if not triggers:
+                triggers = await page.evaluate("""() => {
+                    const modal = document.querySelector('[role="dialog"]') || document.querySelector('.artdeco-modal');
+                    if (!modal) return [];
+                    const btns = modal.querySelectorAll('[aria-haspopup="listbox"], [role="combobox"], button[data-test-text-selectable-option]');
+                    const unselected = [];
+                    for (const btn of btns) {
+                        if (btn.offsetParent === null) continue;
+                        const txt = (btn.innerText || '').trim().toLowerCase();
+                        if (!txt || txt.includes('select') || txt.includes('auswählen') || txt.includes('bitte') || txt.includes('please') || txt === '--') {
+                            unselected.push(true);
+                        }
+                    }
+                    return unselected;
+                }""")
+                if triggers:
+                    triggers = await page.query_selector_all(
+                        "[aria-haspopup='listbox']:visible, [role='combobox']:visible, "
+                        "button[data-test-text-selectable-option]:visible"
+                    )
             for trigger in triggers:
                 try:
+                    # Check if already selected (has real value, not placeholder)
+                    trigger_text = (await trigger.inner_text()).strip().lower()
+                    if trigger_text and trigger_text not in [
+                        "select an option", "option auswählen", "bitte auswählen",
+                        "please select", "--", ""
+                    ]:
+                        continue  # Already has a selection
+
+                    label = ""
+                    try:
+                        label = await trigger.evaluate("""el => {
+                            const container = el.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                            if (container) {
+                                const lbl = container.querySelector('label, .fb-dash-form-element__label, legend');
+                                return lbl ? lbl.innerText.trim() : '';
+                            }
+                            return '';
+                        }""")
+                    except:
+                        pass
+
                     await trigger.click(force=True)
-                    await asyncio.sleep(0.3)
-                    options = await page.query_selector_all("[role='option'], .artdeco-dropdown__item")
+                    await asyncio.sleep(0.4)
+
+                    options = await page.query_selector_all("[role='option']:visible, .artdeco-dropdown__item:visible")
+                    if not options:
+                        await asyncio.sleep(0.3)
+                        options = await page.query_selector_all("[role='option']:visible, .artdeco-dropdown__item:visible")
+
                     picked = False
+                    label_lower = label.lower()
+
+                    # Smart pick based on question label
+                    answer = self._get_linkedin_answer(label_lower, profile, questions_json, field_type="select") if label_lower else "Yes"
+
                     for opt in options:
                         text = (await opt.inner_text()).strip().lower()
-                        if text in ["yes", "ja"]:
+                        if answer and answer.lower() == text:
                             await opt.click()
                             filled += 1
                             picked = True
                             break
                     if not picked:
+                        # Prefer "Yes" / "Ja"
+                        for opt in options:
+                            text = (await opt.inner_text()).strip().lower()
+                            if text in ["yes", "ja"]:
+                                await opt.click()
+                                filled += 1
+                                picked = True
+                                break
+                    if not picked:
+                        # Pick first non-placeholder option
                         for opt in options:
                             text = (await opt.inner_text()).strip()
-                            if text and "select" not in text.lower():
+                            if text and "select" not in text.lower() and "auswählen" not in text.lower():
                                 await opt.click()
                                 filled += 1
                                 break
@@ -5907,11 +6005,128 @@ Respond ONLY with a JSON object mapping field index (as string) to answer. Examp
             if re.search(pattern, label_lower):
                 return answer
 
-        # 5. Default for textarea
+        # 5. Smart fallbacks by field type
         if field_type == "textarea":
             return "I am very interested in this position and believe my experience is a great fit."
+        if field_type == "number":
+            return str(profile.get("years_experience", 5))
+        if field_type == "radio":
+            return "Yes"
+        if field_type == "select":
+            return "Yes"
+
+        # 6. Text field fallback — for unmatched screening questions
+        if field_type == "text" and label_lower:
+            # Common question patterns with smart defaults
+            if any(kw in label_lower for kw in ["how many", "wie viele", "anzahl", "number of"]):
+                return str(profile.get("years_experience", 5))
+            if any(kw in label_lower for kw in ["which", "welche", "what", "was", "describe", "beschreib"]):
+                return "Yes"
+            if any(kw in label_lower for kw in ["when", "wann", "date", "datum"]):
+                return "Immediately"
+            if any(kw in label_lower for kw in ["where", "wo", "location", "standort", "ort"]):
+                return profile.get("city", "Berlin")
+            if any(kw in label_lower for kw in ["why", "warum", "reason", "grund", "motivation"]):
+                return "I am passionate about this role and confident my skills are a strong match."
+            if any(kw in label_lower for kw in ["website", "url", "link", "portfolio"]):
+                return profile.get("website", "")
+            # Last resort: "Yes" works for most yes/no screening questions
+            return "Yes"
 
         return None
+
+    async def _get_linkedin_unfilled_fields(self, page) -> list[str]:
+        """Return labels of empty/error required fields in the current LinkedIn form step."""
+        unfilled = []
+        try:
+            result = await page.evaluate("""() => {
+                const modal = document.querySelector('[role="dialog"]') || document.querySelector('.artdeco-modal') || document;
+                const unfilled = [];
+
+                // Check empty text/number inputs
+                modal.querySelectorAll('input[type="text"], input[type="number"], input[type="tel"], input[type="email"]').forEach(inp => {
+                    if (inp.offsetParent === null) return;
+                    const isEmpty = !inp.value || !inp.value.trim();
+                    const hasError = inp.getAttribute('aria-invalid') === 'true'
+                        || !!inp.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping')?.querySelector('[class*="error"], .artdeco-inline-feedback--error');
+                    if (isEmpty || hasError) {
+                        const container = inp.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                        const label = container?.querySelector('label, .fb-dash-form-element__label')?.innerText
+                            || inp.getAttribute('aria-label') || inp.placeholder || 'unknown';
+                        unfilled.push('input' + (hasError ? '(ERR)' : '') + ': ' + label.trim().substring(0, 60));
+                    }
+                });
+
+                // Empty textareas
+                modal.querySelectorAll('textarea').forEach(ta => {
+                    if (ta.offsetParent === null) return;
+                    if (!ta.value || !ta.value.trim()) {
+                        const container = ta.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                        const label = container?.querySelector('label')?.innerText || 'textarea';
+                        unfilled.push('textarea: ' + label.trim().substring(0, 60));
+                    }
+                });
+
+                // Check unselected native dropdowns
+                modal.querySelectorAll('select').forEach(sel => {
+                    if (sel.offsetParent === null) return;
+                    if (!sel.value || sel.value === '-1' || sel.value === '') {
+                        const container = sel.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                        const label = container?.querySelector('label')?.innerText || 'dropdown';
+                        unfilled.push('select: ' + label.trim().substring(0, 60));
+                    }
+                });
+
+                // Custom dropdowns — check for unselected triggers
+                modal.querySelectorAll('[aria-haspopup="listbox"], [role="combobox"], button[data-test-text-selectable-option]').forEach(btn => {
+                    if (btn.offsetParent === null) return;
+                    const t = (btn.innerText || '').trim().toLowerCase();
+                    if (!t || t.includes('select') || t.includes('auswählen') || t.includes('bitte') || t.includes('please') || t === '--') {
+                        const container = btn.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                        const label = container?.querySelector('label, legend, .fb-dash-form-element__label')?.innerText || 'custom dropdown';
+                        unfilled.push('dropdown: ' + label.trim().substring(0, 60));
+                    }
+                });
+
+                // Also catch custom dropdowns by placeholder text in buttons
+                modal.querySelectorAll('button, [role="button"]').forEach(btn => {
+                    if (btn.offsetParent === null) return;
+                    const t = (btn.innerText || '').trim().toLowerCase();
+                    if ((t.includes('select an option') || t.includes('option auswählen')) && !btn.getAttribute('aria-haspopup')) {
+                        const container = btn.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                        const label = container?.querySelector('label')?.innerText || 'custom dropdown';
+                        unfilled.push('dropdown: ' + label.trim().substring(0, 60));
+                    }
+                });
+
+                // Check unchecked radio groups
+                modal.querySelectorAll('fieldset').forEach(fs => {
+                    if (fs.offsetParent === null) return;
+                    const radios = fs.querySelectorAll('input[type="radio"]');
+                    if (radios.length > 0 && ![...radios].some(r => r.checked)) {
+                        const legend = fs.querySelector('legend')?.innerText || 'radio group';
+                        unfilled.push('radio: ' + legend.trim().substring(0, 60));
+                    }
+                });
+
+                // Check for any fields with error state we may have missed
+                modal.querySelectorAll('.artdeco-inline-feedback--error').forEach(err => {
+                    if (err.offsetParent === null) return;
+                    const container = err.closest('.fb-dash-form-element, .jobs-easy-apply-form-section__grouping');
+                    if (container) {
+                        const label = container.querySelector('label, legend, .fb-dash-form-element__label')?.innerText || '';
+                        const errText = err.innerText?.trim() || '';
+                        const key = 'error: ' + (label || errText).trim().substring(0, 60);
+                        if (!unfilled.includes(key)) unfilled.push(key);
+                    }
+                });
+
+                return unfilled;
+            }""")
+            unfilled = result or []
+        except:
+            pass
+        return unfilled
 
     async def _dismiss_linkedin_modal(self, page):
         """Close any open LinkedIn Easy Apply modal."""

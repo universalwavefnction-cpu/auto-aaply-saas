@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { CreditCard, Check, ExternalLink, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { api } from '../api'
 
@@ -14,11 +14,18 @@ export default function Billing() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
     loadStatus()
     if (searchParams.get('success') === '1') {
+      gtag('event', 'purchase', { currency: 'EUR', value: 8.0 })
+      const onboardingDone = localStorage.getItem('onboarding_complete')
+      if (!onboardingDone) {
+        navigate('/onboarding')
+        return
+      }
       setToast({ type: 'success', message: 'Subscription activated! You can now run the bot.' })
     } else if (searchParams.get('canceled') === '1') {
       setToast({ type: 'error', message: 'Checkout was canceled.' })
@@ -45,6 +52,7 @@ export default function Billing() {
 
   async function handleCheckout() {
     setActionLoading(true)
+    gtag('event', 'begin_checkout', { currency: 'EUR', value: 8.0 })
     try {
       const data = await api.createCheckoutSession()
       if (data.url) window.location.href = data.url
@@ -79,11 +87,11 @@ export default function Billing() {
     : 'text-amber-500 border-amber-500/20 bg-amber-500/10'
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 max-w-3xl mx-auto">
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed right-6 top-6 z-50 flex items-center gap-3 rounded-xl border px-5 py-3 text-sm font-medium shadow-2xl animate-[fadeIn_0.2s] ${
+          className={`fixed right-4 sm:right-6 top-[60px] md:top-6 z-50 left-4 sm:left-auto flex items-center gap-3 rounded-xl border px-5 py-3 text-sm font-medium shadow-2xl animate-[fadeIn_0.2s] ${
             toast.type === 'success'
               ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
               : 'border-red-500/20 bg-red-500/10 text-red-400'
@@ -115,7 +123,7 @@ export default function Billing() {
       ) : (
         <>
           {/* Status card */}
-          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-8 mb-6">
+          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-5 sm:p-8 mb-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30">
@@ -158,19 +166,19 @@ export default function Billing() {
               >
                 <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
                 <span className="relative">
-                  {actionLoading ? 'Redirecting...' : 'Subscribe — €3/month (Pilot)'}
+                  {actionLoading ? 'Redirecting...' : 'Subscribe — €8/month'}
                 </span>
               </button>
             )}
           </div>
 
           {/* Plan details */}
-          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-8">
+          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-5 sm:p-8">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30">
               Plan Details
             </span>
             <div className="mt-4 mb-6 flex items-baseline gap-1">
-              <span className="text-3xl font-black">€3</span>
+              <span className="text-3xl font-black">€8</span>
               <span className="text-sm text-white/40"> / month</span>
             </div>
             <ul className="space-y-3">

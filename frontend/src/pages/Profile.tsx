@@ -40,15 +40,15 @@ export default function Profile() {
   const removeQuestion = (key: string) => { const { [key]: _, ...rest } = questions; setQuestions(rest); showToast('Q&A pair removed') }
 
   if (loading) return (
-    <div className="space-y-8 p-8 max-w-5xl mx-auto">
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-5xl mx-auto">
       <div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="h-10 w-10 rounded-xl bg-white/5 shimmer"></div><div className="space-y-2"><div className="h-6 w-32 rounded bg-white/5 shimmer"></div><div className="h-3 w-24 rounded bg-white/5 shimmer"></div></div></div><div className="h-10 w-32 rounded-xl bg-white/5 shimmer"></div></div>
       <div className="grid gap-8 lg:grid-cols-12"><div className="space-y-8 lg:col-span-7"><div className="h-96 rounded-2xl bg-white/5 shimmer"></div></div><div className="space-y-8 lg:col-span-5"><div className="h-64 rounded-2xl bg-white/5 shimmer"></div><div className="h-64 rounded-2xl bg-white/5 shimmer"></div></div></div>
     </div>
   )
 
   return (
-    <div className="space-y-8 p-8 max-w-5xl mx-auto relative">
-      <div className={`fixed top-8 right-8 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl backdrop-blur-md transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0 pointer-events-none'}`}><CheckCircle2 className="h-4 w-4" />{toast.msg}</div>
+    <div className="space-y-6 sm:space-y-8 p-4 sm:p-6 md:p-8 max-w-5xl mx-auto relative">
+      <div className={`fixed top-[60px] md:top-8 right-4 sm:right-8 left-4 sm:left-auto z-50 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-400 shadow-2xl backdrop-blur-md transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0 pointer-events-none'}`}><CheckCircle2 className="h-4 w-4" />{toast.msg}</div>
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Bot,
   Search,
+  Radar,
   Send,
   UserCircle,
   Settings,
@@ -34,6 +35,9 @@ import Contact from './pages/Contact'
 import Debug from './pages/Debug'
 import Support from './pages/Support'
 import LinkedInSetup from './pages/LinkedInSetup'
+import Discovery from './pages/Discovery'
+import DemoTour from './components/demo/DemoTour'
+import OnboardingTour from './components/onboarding/OnboardingTour'
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'))
@@ -93,14 +97,21 @@ function App() {
   }
 
   // Public routes: landing page and login
-  const PUBLIC_PATHS = ['/', '/login', '/contact']
-  const isPublicPath = PUBLIC_PATHS.includes(location.pathname)
+  const PUBLIC_PATHS = ['/', '/login', '/contact', '/demo']
+  const FULL_SCREEN_PATHS = [...PUBLIC_PATHS, '/onboarding']
+  const isFullScreenPath = FULL_SCREEN_PATHS.includes(location.pathname)
 
-  if (isPublicPath) {
+  if (isFullScreenPath) {
+    // /onboarding requires auth
+    if (location.pathname === '/onboarding' && !token) {
+      return <Navigate to="/login?register=1" replace />
+    }
     return (
       <Routes location={location}>
         <Route path="/" element={<LandingPage />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/demo" element={<DemoTour />} />
+        <Route path="/onboarding" element={<OnboardingTour />} />
         <Route
           path="/login"
           element={
@@ -111,31 +122,41 @@ function App() {
     )
   }
 
-  // Protected routes: require auth
-  if (!token) {
-    return <Navigate to="/login" replace />
+  // Guest mode: allow dashboard without auth
+  const isGuest = !token
+
+  // Protected routes: require auth (except dashboard)
+  if (isGuest && location.pathname !== '/dashboard') {
+    return <Navigate to="/login?register=1" replace />
   }
 
   const isPaid = subStatus === 'active'
   const isAdmin = userEmail === 'dimitri.perepelkin@gmail.com'
 
-  const nav = [
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Mission Control', mobileLabel: 'Home' },
-    { path: '/bot', icon: Bot, label: 'Live Bot', mobileLabel: 'Bot' },
-    { path: '/jobs', icon: Search, label: 'Discovery', mobileLabel: 'Jobs' },
-    { path: '/applications', icon: Send, label: 'Applications', mobileLabel: 'Apps' },
-    { path: '/profile', icon: UserCircle, label: 'Profile', mobileLabel: 'Profile' },
-    { path: '/settings', icon: Settings, label: 'Settings', mobileLabel: 'Settings' },
-    { path: '/billing', icon: CreditCard, label: 'Billing', mobileLabel: 'Billing' },
-    { path: '/support', icon: MessageSquare, label: 'Support', mobileLabel: 'Support' },
-    { path: '/linkedin-setup', icon: AlertCircle, label: 'LinkedIn Setup', mobileLabel: 'LinkedIn', alert: true },
-    ...(isAdmin ? [{ path: '/debug', icon: Bug, label: 'Debug', mobileLabel: 'Debug' }] : []),
-  ]
+  const nav = isGuest
+    ? [
+        { path: '/dashboard', icon: LayoutDashboard, label: 'Mission Control', mobileLabel: 'Home' },
+      ]
+    : [
+        { path: '/dashboard', icon: LayoutDashboard, label: 'Mission Control', mobileLabel: 'Home' },
+        { path: '/bot', icon: Bot, label: 'Live Bot', mobileLabel: 'Bot' },
+        { path: '/discovery', icon: Radar, label: 'Job Discovery', mobileLabel: 'Discover' },
+        { path: '/jobs', icon: Search, label: 'Scraped Jobs', mobileLabel: 'Jobs' },
+        { path: '/applications', icon: Send, label: 'Applications', mobileLabel: 'Apps' },
+        { path: '/profile', icon: UserCircle, label: 'Profile', mobileLabel: 'Profile' },
+        { path: '/settings', icon: Settings, label: 'Settings', mobileLabel: 'Settings' },
+        { path: '/billing', icon: CreditCard, label: 'Billing', mobileLabel: 'Billing' },
+        { path: '/support', icon: MessageSquare, label: 'Support', mobileLabel: 'Support' },
+        { path: '/linkedin-setup', icon: AlertCircle, label: 'LinkedIn Setup', mobileLabel: 'LinkedIn', alert: true },
+        ...(isAdmin ? [{ path: '/debug', icon: Bug, label: 'Debug', mobileLabel: 'Debug' }] : []),
+      ]
 
   // Bottom tab bar: show 5 main items
-  const bottomNav = nav.filter((n) =>
-    ['/dashboard', '/bot', '/jobs', '/applications', '/profile'].includes(n.path)
-  )
+  const bottomNav = isGuest
+    ? [{ path: '/dashboard', icon: LayoutDashboard, label: 'Home', mobileLabel: 'Home' }]
+    : nav.filter((n) =>
+        ['/dashboard', '/bot', '/discovery', '/applications', '/profile'].includes(n.path)
+      )
 
   return (
     <div className="flex h-screen bg-[#050505] font-sans text-white overflow-hidden selection:bg-amber-500/30">
@@ -161,7 +182,7 @@ function App() {
             return (
               <Link
                 key={path}
-                to={path}
+                to={isGuest && path !== '/dashboard' ? '/login?register=1' : path}
                 className={`group relative flex items-center gap-3 rounded-xl px-4 py-3 text-xs font-bold uppercase tracking-[0.1em] transition-all duration-200 ${
                   isActive
                     ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.05)]'
@@ -217,24 +238,37 @@ function App() {
           </div>
         </div>
 
-        <div className="flex border-t border-white/5">
-          <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="group flex flex-1 items-center justify-center gap-2 p-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white/30 transition-colors hover:text-amber-500 hover:bg-amber-500/5 theme-toggle-btn"
-          >
-            {theme === 'dark' ? (
-              <Sun className="h-4 w-4 transition-transform group-hover:rotate-90" />
-            ) : (
-              <Moon className="h-4 w-4 transition-transform group-hover:-rotate-12" />
-            )}
-          </button>
-          <button
-            onClick={handleLogout}
-            className="group flex flex-1 items-center justify-center gap-2 border-l border-white/5 p-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white/30 transition-colors hover:text-red-400 hover:bg-red-500/5"
-          >
-            <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
-          </button>
-        </div>
+        {isGuest ? (
+          <div className="border-t border-white/5 p-4">
+            <Link
+              to="/login?register=1"
+              className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-amber-500 py-3.5 text-xs font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] transition-all hover:bg-amber-400"
+            >
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+              <CreditCard className="relative h-4 w-4" />
+              <span className="relative">Subscribe — €8/mo</span>
+            </Link>
+          </div>
+        ) : (
+          <div className="flex border-t border-white/5">
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="group flex flex-1 items-center justify-center gap-2 p-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white/30 transition-colors hover:text-amber-500 hover:bg-amber-500/5 theme-toggle-btn"
+            >
+              {theme === 'dark' ? (
+                <Sun className="h-4 w-4 transition-transform group-hover:rotate-90" />
+              ) : (
+                <Moon className="h-4 w-4 transition-transform group-hover:-rotate-12" />
+              )}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="group flex flex-1 items-center justify-center gap-2 border-l border-white/5 p-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white/30 transition-colors hover:text-red-400 hover:bg-red-500/5"
+            >
+              <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
+            </button>
+          </div>
+        )}
       </nav>
 
       {/* Mobile Header — visible on mobile only */}
@@ -245,16 +279,25 @@ function App() {
           </div>
           <span className="text-sm font-bold tracking-tight">AutoApply</span>
         </div>
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/50"
-        >
-          {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-        </button>
+        {isGuest ? (
+          <Link
+            to="/login?register=1"
+            className="rounded-lg bg-amber-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-black transition-colors hover:bg-amber-400"
+          >
+            Subscribe — €8/mo
+          </Link>
+        ) : (
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/50"
+          >
+            {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          </button>
+        )}
       </div>
 
       {/* Mobile slide-down menu */}
-      {mobileMenuOpen && (
+      {mobileMenuOpen && !isGuest && (
         <div className="fixed inset-0 z-30 md:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileMenuOpen(false)} />
           <div className="absolute top-[53px] left-0 right-0 border-b border-white/10 bg-[#0A0A0A] p-4 space-y-1 max-h-[70vh] overflow-auto">
@@ -296,22 +339,22 @@ function App() {
       )}
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-[#050505] relative custom-scrollbar pt-[53px] md:pt-0 pb-[68px] md:pb-0">
+      <main className={`flex-1 overflow-auto bg-[#050505] relative custom-scrollbar pt-[53px] md:pt-0 ${isGuest ? 'pb-0' : 'pb-[68px] md:pb-0'}`}>
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/5 via-[#050505] to-[#050505] pointer-events-none"></div>
 
-        {/* Paywall banner for unpaid users */}
-        {!subLoading && !isPaid && (
-          <div className="sticky top-0 z-20 border-b border-amber-500/20 bg-amber-500/10 backdrop-blur-xl">
-            <div className="mx-auto flex max-w-4xl items-center justify-between px-4 md:px-6 py-2.5 md:py-3">
-              <div className="flex items-center gap-2 md:gap-3">
+        {/* Paywall banner for unpaid logged-in users — sticky on desktop */}
+        {!isGuest && !subLoading && !isPaid && (
+          <div className="hidden md:block sticky top-0 z-20 border-b border-amber-500/20 bg-amber-500/10 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
+              <div className="flex items-center gap-3">
                 <CreditCard className="h-4 w-4 shrink-0 text-amber-500" />
-                <span className="text-xs md:text-sm font-bold text-amber-200">
-                  Subscribe to unlock — €3/mo
+                <span className="text-sm font-bold text-amber-200">
+                  Subscribe to unlock — €8/mo
                 </span>
               </div>
               <Link
                 to="/billing"
-                className="shrink-0 rounded-lg bg-amber-500 px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-black uppercase tracking-wider text-black transition-colors hover:bg-amber-400"
+                className="shrink-0 rounded-lg bg-amber-500 px-4 py-1.5 text-xs font-black uppercase tracking-wider text-black transition-colors hover:bg-amber-400"
               >
                 Subscribe
               </Link>
@@ -319,10 +362,12 @@ function App() {
           </div>
         )}
 
+
         <div key={location.pathname} className="relative z-10 h-full page-transition">
           <Routes location={location}>
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Dashboard isGuest={isGuest} />} />
             <Route path="/bot" element={<BotLive />} />
+            <Route path="/discovery" element={<Discovery />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/profile" element={<Profile />} />
@@ -336,24 +381,26 @@ function App() {
         </div>
       </main>
 
-      {/* Mobile Bottom Tab Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden border-t border-white/5 bg-[#080808]/95 backdrop-blur-xl">
-        {bottomNav.map(({ path, icon: Icon, mobileLabel }) => {
-          const isActive = location.pathname === path
-          return (
-            <Link
-              key={path}
-              to={path}
-              className={`flex flex-1 flex-col items-center gap-1 py-2.5 transition-colors ${
-                isActive ? 'text-amber-500' : 'text-white/30'
-              }`}
-            >
-              <Icon className={`h-5 w-5 ${isActive ? 'scale-110' : ''} transition-transform`} />
-              <span className="text-[9px] font-bold uppercase tracking-wider">{mobileLabel}</span>
-            </Link>
-          )
-        })}
-      </div>
+      {/* Mobile Bottom Tab Bar — hidden for guests */}
+      {!isGuest && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden border-t border-white/5 bg-[#080808]/95 backdrop-blur-xl">
+          {bottomNav.map(({ path, icon: Icon, mobileLabel }) => {
+            const isActive = location.pathname === path
+            return (
+              <Link
+                key={path}
+                to={path}
+                className={`flex flex-1 flex-col items-center gap-1 py-2.5 transition-colors ${
+                  isActive ? 'text-amber-500' : 'text-white/30'
+                }`}
+              >
+                <Icon className={`h-5 w-5 ${isActive ? 'scale-110' : ''} transition-transform`} />
+                <span className="text-[9px] font-bold uppercase tracking-wider">{mobileLabel}</span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
