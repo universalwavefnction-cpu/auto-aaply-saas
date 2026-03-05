@@ -69,7 +69,7 @@ export default function Applications() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] shadow-2xl">
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] shadow-2xl card-glow">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead><tr className="border-b border-white/10 bg-white/[0.02]">{['Title', 'Company', 'Platform', 'Status', 'Response', 'Date', ''].map((h) => <th key={h} className="whitespace-nowrap px-6 py-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{h}</th>)}</tr></thead>
@@ -77,7 +77,7 @@ export default function Applications() {
               {loading ? Array.from({ length: 10 }).map((_, i) => <tr key={i} className="border-b border-white/5">{Array.from({ length: 7 }).map((_, j) => <td key={j} className="px-6 py-4"><div className="h-4 w-full rounded bg-white/5 shimmer"></div></td>)}</tr>) : apps.length === 0 ? (
                 <tr><td colSpan={7} className="px-6 py-16 text-center"><div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/5"><Send className="h-6 w-6 text-white/20" /></div><p className="text-sm font-black uppercase tracking-[0.2em] text-white/40">No applications found</p></td></tr>
               ) : apps.map((a) => (
-                <tr key={a.id} className="group border-b border-white/5 transition-colors hover:bg-white/[0.02]">
+                <tr key={a.id} className="group border-b border-white/5 table-row-hover">
                   <td className="max-w-[250px] px-6 py-4"><div className="truncate font-bold text-white/80 group-hover:text-white transition-colors">{a.job_title || '-'}</div></td>
                   <td className="px-6 py-4"><div className="text-white/40">{a.company || '-'}</div></td>
                   <td className="px-6 py-4"><span className={`inline-flex rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${a.platform === 'stepstone' ? 'border-amber-500/20 bg-amber-500/10 text-amber-500' : a.platform === 'xing' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400' : a.platform === 'linkedin' ? 'border-blue-500/20 bg-blue-500/10 text-blue-400' : a.platform === 'indeed' ? 'border-purple-500/20 bg-purple-500/10 text-purple-400' : 'border-white/10 bg-white/5 text-white/30'}`}>{a.platform}</span></td>

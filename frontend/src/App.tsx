@@ -44,6 +44,8 @@ function App() {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [subStatus, setSubStatus] = useState<string | null>(null)
   const [subLoading, setSubLoading] = useState(false)
+  const [freeAppsUsed, setFreeAppsUsed] = useState(0)
+  const [freeAppsLimit, setFreeAppsLimit] = useState(30)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [theme, setTheme] = useState<'dark' | 'light'>(
     (localStorage.getItem('theme') as 'dark' | 'light') || 'dark'
@@ -64,9 +66,11 @@ function App() {
       setSubLoading(true)
       api
         .me()
-        .then((data: { subscription_status?: string; email?: string }) => {
+        .then((data: { subscription_status?: string; email?: string; free_applications_used?: number; free_applications_limit?: number }) => {
           setSubStatus(data.subscription_status || 'free')
           setUserEmail(data.email || null)
+          setFreeAppsUsed(data.free_applications_used || 0)
+          setFreeAppsLimit(data.free_applications_limit || 30)
           setSubLoading(false)
         })
         .catch(() => {
@@ -86,7 +90,8 @@ function App() {
   const handleLogin = (t: string) => {
     localStorage.setItem('token', t)
     setToken(t)
-    navigate('/billing')
+    const onboardingDone = localStorage.getItem('onboarding_complete')
+    navigate(onboardingDone ? '/dashboard' : '/onboarding')
   }
 
   const handleLogout = () => {
@@ -246,10 +251,26 @@ function App() {
             >
               <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
               <CreditCard className="relative h-4 w-4" />
-              <span className="relative">Subscribe — €8/mo</span>
+              <span className="relative">Start Free — 30 Apps</span>
             </Link>
           </div>
         ) : (
+          <>
+          {userEmail && (
+            <div className="border-t border-white/5 px-4 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-sm font-black text-black shadow-lg shadow-amber-500/20">
+                  {userEmail.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-bold text-white/80">{userEmail}</p>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-white/30">
+                    {subStatus === 'active' ? 'Pro Member' : 'Free Plan'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex border-t border-white/5">
             <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -268,6 +289,7 @@ function App() {
               <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
             </button>
           </div>
+          </>
         )}
       </nav>
 
@@ -284,7 +306,7 @@ function App() {
             to="/login?register=1"
             className="rounded-lg bg-amber-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-black transition-colors hover:bg-amber-400"
           >
-            Subscribe — €8/mo
+            Start Free — 30 Apps
           </Link>
         ) : (
           <button
@@ -340,27 +362,48 @@ function App() {
 
       {/* Main content */}
       <main className={`flex-1 overflow-auto bg-[#050505] relative custom-scrollbar pt-[53px] md:pt-0 ${isGuest ? 'pb-0' : 'pb-[68px] md:pb-0'}`}>
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/5 via-[#050505] to-[#050505] pointer-events-none"></div>
+        <div className="absolute inset-0 mesh-gradient pointer-events-none"></div>
 
-        {/* Paywall banner for unpaid logged-in users — sticky on desktop */}
-        {!isGuest && !subLoading && !isPaid && (
-          <div className="hidden md:block sticky top-0 z-20 border-b border-amber-500/20 bg-amber-500/10 backdrop-blur-xl">
-            <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
-              <div className="flex items-center gap-3">
-                <CreditCard className="h-4 w-4 shrink-0 text-amber-500" />
-                <span className="text-sm font-bold text-amber-200">
-                  Subscribe to unlock — €8/mo
-                </span>
+        {/* Free tier banner — shows remaining apps or upgrade prompt */}
+        {!isGuest && !subLoading && !isPaid && (() => {
+          const remaining = Math.max(0, freeAppsLimit - freeAppsUsed)
+          const pct = (freeAppsUsed / freeAppsLimit) * 100
+          const exhausted = remaining === 0
+          const low = remaining > 0 && remaining <= 5
+
+          return (
+            <div className={`hidden md:block sticky top-0 z-20 border-b backdrop-blur-xl ${exhausted ? 'border-red-500/20 bg-red-500/10' : low ? 'border-amber-500/20 bg-amber-500/10' : 'border-emerald-500/20 bg-emerald-500/5'}`}>
+              <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <CreditCard className={`h-4 w-4 shrink-0 ${exhausted ? 'text-red-400' : low ? 'text-amber-500' : 'text-emerald-400'}`} />
+                  <div className="flex flex-col gap-1 flex-1 min-w-0">
+                    <span className={`text-sm font-bold ${exhausted ? 'text-red-200' : low ? 'text-amber-200' : 'text-emerald-200'}`}>
+                      {exhausted
+                        ? 'Free applications used up — subscribe for unlimited'
+                        : low
+                          ? `Only ${remaining} free application${remaining === 1 ? '' : 's'} left`
+                          : `${remaining}/${freeAppsLimit} free applications remaining`}
+                    </span>
+                    {!exhausted && (
+                      <div className="h-1.5 w-full max-w-xs rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${low ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Link
+                  to="/billing"
+                  className={`shrink-0 ml-4 rounded-lg px-4 py-1.5 text-xs font-black uppercase tracking-wider transition-colors ${exhausted ? 'bg-amber-500 text-black hover:bg-amber-400' : 'border border-white/10 text-white/60 hover:bg-white/5 hover:text-white'}`}
+                >
+                  {exhausted ? 'Subscribe — €8/mo' : 'Upgrade'}
+                </Link>
               </div>
-              <Link
-                to="/billing"
-                className="shrink-0 rounded-lg bg-amber-500 px-4 py-1.5 text-xs font-black uppercase tracking-wider text-black transition-colors hover:bg-amber-400"
-              >
-                Subscribe
-              </Link>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
 
         <div key={location.pathname} className="relative z-10 h-full page-transition">
@@ -390,11 +433,14 @@ function App() {
               <Link
                 key={path}
                 to={path}
-                className={`flex flex-1 flex-col items-center gap-1 py-2.5 transition-colors ${
+                className={`flex flex-1 flex-col items-center gap-1 py-2.5 relative transition-colors ${
                   isActive ? 'text-amber-500' : 'text-white/30'
                 }`}
               >
-                <Icon className={`h-5 w-5 ${isActive ? 'scale-110' : ''} transition-transform`} />
+                {isActive && (
+                  <div className="absolute -top-0.5 h-0.5 w-6 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+                )}
+                <Icon className={`h-5 w-5 transition-transform duration-200 ${isActive ? 'scale-110' : ''}`} />
                 <span className="text-[9px] font-bold uppercase tracking-wider">{mobileLabel}</span>
               </Link>
             )

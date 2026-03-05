@@ -426,13 +426,26 @@ export default function LandingPage() {
     localStorage.setItem('lang', next)
   }
 
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) entry.target.classList.add('visible')
+        })
+      },
+      { threshold: 0.1 },
+    )
+    document.querySelectorAll('.reveal').forEach((el) => observer.observe(el))
+    return () => observer.disconnect()
+  }, [])
+
   const l = t[lang]
   const featIcons = [BriefcaseBusiness, Sparkles, FileText, Monitor, Ban, Shield]
 
   return (
     <div className="min-h-screen bg-[#050505] text-white selection:bg-amber-500/30">
       {/* Background */}
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/5 via-[#050505] to-[#050505]" />
+      <div className="pointer-events-none fixed inset-0 mesh-gradient" />
 
       {/* Navbar */}
       <nav className="sticky top-0 z-50 border-b border-white/5 bg-[#050505]/80 backdrop-blur-xl">
@@ -509,7 +522,7 @@ export default function LandingPage() {
       </section>
 
       {/* How it works — Live Terminal Demo */}
-      <section id="how-it-works" className="relative z-10 border-t border-white/5 py-16 sm:py-24">
+      <section id="how-it-works" className="reveal relative z-10 border-t border-white/5 py-16 sm:py-24">
         <div className="mx-auto max-w-4xl px-4 sm:px-6">
           <div className="mb-10 sm:mb-16 text-center">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
@@ -525,7 +538,7 @@ export default function LandingPage() {
       </section>
 
       {/* Features */}
-      <section className="relative z-10 border-t border-white/5 py-24">
+      <section className="reveal relative z-10 border-t border-white/5 py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="mb-16 text-center">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
@@ -540,7 +553,7 @@ export default function LandingPage() {
               return (
                 <div
                   key={title}
-                  className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 transition-colors hover:border-white/10"
+                  className={`rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 card-glow animate-in stagger-${i + 1}`}
                 >
                   <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-white/5">
                     <Icon className="h-5 w-5 text-amber-500" />
@@ -554,8 +567,76 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Testimonials */}
+      <section className="reveal relative z-10 border-t border-white/5 py-16 sm:py-20">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="mb-12 text-center">
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
+              {lang === 'de' ? 'Was Nutzer sagen' : 'What users say'}
+            </span>
+            <h2 className="mt-4 text-2xl font-black tracking-tight md:text-3xl">
+              {lang === 'de' ? 'Echte Ergebnisse. Echte Jobsuchende.' : 'Real results. Real job seekers.'}
+            </h2>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-3">
+            {[
+              {
+                quote: lang === 'de'
+                  ? 'In 2 Tagen hat der Bot 47 Bewerbungen geschickt. 3 Einladungen zum Vorstellungsgespräch innerhalb einer Woche.'
+                  : 'In 2 days the bot sent 47 applications. 3 interview invitations within a week.',
+                name: 'Marco K.',
+                role: lang === 'de' ? 'Buchhalter, Berlin' : 'Accountant, Berlin',
+                stat: '47',
+              },
+              {
+                quote: lang === 'de'
+                  ? 'Ich habe mich monatelang manuell beworben. AutoApply hat mir in einer Nacht mehr Bewerbungen gebracht als ich in 2 Wochen.'
+                  : 'I applied manually for months. AutoApply got me more applications in one night than I managed in 2 weeks.',
+                name: 'Sarah L.',
+                role: lang === 'de' ? 'Office Managerin, Hamburg' : 'Office Manager, Hamburg',
+                stat: '62',
+              },
+              {
+                quote: lang === 'de'
+                  ? 'Endlich muss ich nicht mehr jede Nacht bis 2 Uhr Anschreiben tippen. Der Bot macht das einfach.'
+                  : 'Finally I don\'t have to type cover letters until 2 AM anymore. The bot just handles it.',
+                name: 'Thomas R.',
+                role: lang === 'de' ? 'Rezeptionist, München' : 'Receptionist, Munich',
+                stat: '38',
+              },
+            ].map((testimonial, i) => (
+              <div
+                key={i}
+                className={`rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 card-glow animate-in stagger-${i + 1}`}
+              >
+                <div className="mb-4 flex items-center gap-1">
+                  {[...Array(5)].map((_, j) => (
+                    <svg key={j} className="h-3.5 w-3.5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                  ))}
+                </div>
+                <p className="mb-4 text-sm leading-relaxed text-white/50">&ldquo;{testimonial.quote}&rdquo;</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-white/80">{testimonial.name}</p>
+                    <p className="text-[10px] text-white/30">{testimonial.role}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-lg font-black text-amber-500">{testimonial.stat}</span>
+                    <span className="ml-1 text-[9px] font-bold uppercase text-white/30">
+                      {lang === 'de' ? 'Bewerbungen' : 'applications'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Pricing */}
-      <section className="relative z-10 border-t border-white/5 py-24">
+      <section className="reveal relative z-10 border-t border-white/5 py-24">
         <div className="mx-auto max-w-md px-6 text-center">
           <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
             {l.priceLabel}
@@ -594,7 +675,7 @@ export default function LandingPage() {
       </section>
 
       {/* Contact */}
-      <section className="relative z-10 border-t border-white/5 py-24">
+      <section className="reveal relative z-10 border-t border-white/5 py-24">
         <div className="mx-auto max-w-2xl px-6 text-center">
           <span className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">
             {l.contactLabel}

@@ -14,11 +14,27 @@ import {
 } from 'lucide-react'
 import { api } from '../api'
 
+function useCountUp(target: number, duration = 1200) {
+  const [value, setValue] = useState(0)
+  useEffect(() => {
+    if (target === 0) { setValue(0); return }
+    const start = performance.now()
+    const step = (now: number) => {
+      const progress = Math.min((now - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setValue(Math.round(eased * target))
+      if (progress < 1) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+  }, [target, duration])
+  return value
+}
+
 export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
   const [stats, setStats] = useState<any>(null)
   const [jobTitle, setJobTitle] = useState('')
   const [location, setLocation] = useState('')
-  const [platform, setPlatform] = useState('stepstone')
+  const [platform, setPlatform] = useState('xing')
   const [maxApps, setMaxApps] = useState(10)
   const [selectedCv, setSelectedCv] = useState<number | null>(null)
   const [cvs, setCvs] = useState<any[]>([])
@@ -68,33 +84,42 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
     navigate('/bot')
   }
 
+  const rawApps = stats?.total_applications || 0
+  const rawRate = stats?.success_rate || 0
+  const rawResponses = stats
+    ? Object.entries(stats.by_response || {})
+        .filter(([k]) => k !== 'waiting' && k !== 'PENDING')
+        .reduce((s: number, [, v]) => s + (v as number), 0)
+    : 0
+
+  const animApps = useCountUp(rawApps)
+  const animRate = useCountUp(rawRate)
+  const animResponses = useCountUp(rawResponses)
+
   const statCards = [
     {
       label: 'Live Applications',
-      val: stats?.total_applications?.toLocaleString() || '0',
+      val: animApps.toLocaleString(),
       accent: 'text-amber-500',
       icon: Activity,
       bg: 'bg-amber-500/10',
-      border: 'border-amber-500/20'
+      border: 'border-amber-500/20',
     },
     {
       label: 'Success Rate',
-      val: `${stats?.success_rate || 0}%`,
+      val: `${animRate}%`,
       accent: 'text-emerald-400',
       icon: CheckCircle2,
       bg: 'bg-emerald-500/10',
-      border: 'border-emerald-500/20'
+      border: 'border-emerald-500/20',
     },
-{
+    {
       label: 'Responses',
-      val: stats ? Object.entries(stats.by_response || {})
-        .filter(([k]) => k !== 'waiting' && k !== 'PENDING')
-        .reduce((s: number, [, v]) => s + (v as number), 0)
-        .toString() : '0',
+      val: animResponses.toString(),
       accent: 'text-purple-400',
       icon: MessageSquare,
       bg: 'bg-purple-500/10',
-      border: 'border-purple-500/20'
+      border: 'border-purple-500/20',
     },
   ]
 
@@ -125,7 +150,7 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
       </div>
 
       {/* Quick Launch */}
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] p-4 sm:p-6 md:p-8 shadow-2xl transition-all hover:border-white/20">
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0A0A0A] p-4 sm:p-6 md:p-8 shadow-2xl card-glow gradient-border animate-in">
         <div className="absolute top-0 right-0 p-32 bg-amber-500/5 blur-[100px] rounded-full pointer-events-none"></div>
 
         <div className="relative z-10">
@@ -170,17 +195,23 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
                 <Globe className="h-3 w-3" /> Platform
               </label>
               <div className="flex h-[58px] gap-1.5 rounded-xl border border-white/10 bg-black/50 p-1.5">
-                {(['stepstone', 'xing', 'indeed', 'linkedin'] as const).map((p) => (
+                {([
+                  { id: 'xing', label: 'Xing', short: 'XI' },
+                  { id: 'stepstone', label: 'StepStone', short: 'SS' },
+                  { id: 'linkedin', label: 'LinkedIn', short: 'LI' },
+                  { id: 'indeed', label: 'Indeed', short: 'IN' },
+                ] as const).map((p) => (
                   <button
-                    key={p}
-                    onClick={() => setPlatform(p)}
-                    className={`flex-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                      platform === p
-                        ? 'bg-amber-500 text-black shadow-md scale-100'
-                        : 'text-white/40 hover:bg-white/5 hover:text-white/80 scale-95 hover:scale-100'
+                    key={p.id}
+                    onClick={() => setPlatform(p.id)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                      platform === p.id
+                        ? 'bg-amber-500 text-black shadow-md'
+                        : 'text-white/40 hover:bg-white/5 hover:text-white/80'
                     }`}
                   >
-                    {p === 'stepstone' ? 'SS' : p === 'indeed' ? 'IN' : p === 'xing' ? 'XI' : 'LI'}
+                    <span className="hidden sm:inline">{p.label}</span>
+                    <span className="sm:hidden">{p.short}</span>
                   </button>
                 ))}
               </div>
@@ -199,7 +230,7 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
                   max={500}
                   value={maxApps}
                   onChange={(e) => setMaxApps(Number(e.target.value))}
-                  className="h-1.5 flex-1 sm:w-32 sm:flex-none cursor-pointer appearance-none rounded-full bg-white/10 accent-amber-500"
+                  className="flex-1 sm:w-32 sm:flex-none"
                 />
                 <span className="w-12 text-right text-lg font-black tabular-nums text-amber-500">
                   {maxApps}
@@ -260,7 +291,7 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
         {statCards.map((stat, i) => (
           <div
             key={i}
-            className="stat-card group relative overflow-hidden rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 transition-all hover:border-white/10 hover:bg-white/[0.02] hover:-translate-y-1"
+            className={`stat-card group relative overflow-hidden rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 transition-all hover:-translate-y-1 card-glow animate-in stagger-${i + 1}`}
           >
             <div className="flex items-center justify-between mb-4">
               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
@@ -282,7 +313,7 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
       {/* Breakdown & Activity */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-1">
-          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 transition-all hover:border-white/10">
+          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 card-glow">
             <span className="mb-6 block text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
               Platform Distribution
             </span>
@@ -325,12 +356,18 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
                   </div>
                 )
               }) : (
-                <div className="py-4 text-center text-[10px] text-white/20 uppercase tracking-wider font-bold">No data available</div>
+                <div className="flex flex-col items-center justify-center py-8 gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5">
+                    <Globe className="h-5 w-5 text-white/15" />
+                  </div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/25">No data yet</p>
+                  <p className="text-[9px] text-white/15">Launch a bot session to start tracking</p>
+                </div>
               )}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 transition-all hover:border-white/10">
+          <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 card-glow">
             <span className="mb-6 block text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
               Status Breakdown
             </span>
@@ -373,13 +410,19 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
                   </div>
                 )
               }) : (
-                <div className="py-4 text-center text-[10px] text-white/20 uppercase tracking-wider font-bold">No data available</div>
+                <div className="flex flex-col items-center justify-center py-8 gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5">
+                    <CheckCircle2 className="h-5 w-5 text-white/15" />
+                  </div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/25">No data yet</p>
+                  <p className="text-[9px] text-white/15">Status breakdown appears after applications</p>
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 lg:col-span-2 flex flex-col transition-all hover:border-white/10">
+        <div className="rounded-2xl border border-white/5 bg-[#0A0A0A] p-6 lg:col-span-2 flex flex-col card-glow">
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Activity className="h-4 w-4 text-amber-500" />
@@ -443,8 +486,12 @@ export default function Dashboard({ isGuest = false }: { isGuest?: boolean }) {
                 </div>
               </div>
             )) : (
-              <div className="flex h-full items-center justify-center text-[10px] text-white/20 uppercase tracking-wider font-bold">
-                No recent activity
+              <div className="flex h-full flex-col items-center justify-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
+                  <Activity className="h-6 w-6 text-white/15" />
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/25">No recent activity</p>
+                <p className="text-[9px] text-white/15">Your audit log will appear here once the bot runs</p>
               </div>
             )}
           </div>

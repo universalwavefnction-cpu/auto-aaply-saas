@@ -36,8 +36,8 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#050505] selection:bg-amber-500/30">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-amber-500/5 via-[#050505] to-[#050505]"></div>
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[800px] w-[800px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-500/5 blur-[120px] animate-pulse" />
+      <div className="pointer-events-none absolute inset-0 mesh-gradient"></div>
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[800px] w-[800px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-500/5 blur-[120px] orbital-glow" />
 
       <div className="relative z-10 w-full max-w-md px-6">
         <div className="mb-12 text-center fadeIn">
